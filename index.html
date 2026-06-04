@@ -927,7 +927,9 @@ function createGoal(x, flip) {
 createGoal(-52.5, false);
 createGoal(52.5, true);
 
-// ── Stadium stands ──
+// ── Stadium stands with spectators ──
+const spectatorMeshes = [];
+
 function createStand(x, z, width, depth, rot) {
   const standGroup = new THREE.Group();
   const rows = 8;
@@ -941,15 +943,31 @@ function createStand(x, z, width, depth, rot) {
     step.position.set(0, r * 0.8 + 0.4, r * (depth / rows) * 0.5);
     standGroup.add(step);
 
-    // Spectator dots
-    const dotCount = Math.floor(width / 1.5);
-    for (let d = 0; d < dotCount; d++) {
-      const dotGeo = new THREE.SphereGeometry(0.2, 4, 4);
+    // Spectators with body + head
+    const specCount = Math.floor(width / 1.2);
+    for (let d = 0; d < specCount; d++) {
+      const specGroup = new THREE.Group();
       const hue = Math.random();
-      const dotMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue, 0.5, 0.5) });
-      const dot = new THREE.Mesh(dotGeo, dotMat);
-      dot.position.set(-width/2 + d * 1.5 + Math.random() * 0.5, r * 0.8 + 1.0, r * (depth/rows) * 0.5);
-      standGroup.add(dot);
+      const shirtColor = new THREE.Color().setHSL(hue, 0.6, 0.45);
+      // Body
+      const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 5);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.8 });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 0.25;
+      specGroup.add(body);
+      // Head
+      const headGeo = new THREE.SphereGeometry(0.12, 5, 4);
+      const headMat = new THREE.MeshStandardMaterial({ color: 0xDEB887, roughness: 0.8 });
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 0.6;
+      specGroup.add(head);
+
+      const sx = -width/2 + d * 1.2 + Math.random() * 0.4;
+      const sy = r * 0.8 + 0.8;
+      const sz = r * (depth/rows) * 0.5;
+      specGroup.position.set(sx, sy, sz);
+      standGroup.add(specGroup);
+      spectatorMeshes.push(specGroup);
     }
   }
 
@@ -965,30 +983,58 @@ createStand(0, 42, 100, 12, Math.PI);
 createStand(-60, 0, 68, 10, Math.PI / 2);
 createStand(60, 0, 68, 10, -Math.PI / 2);
 
-// ── Ad boards ──
-const adTexts = ['AI3FOOTBALL', 'NETSWITCH', 'AI2ORBIT', 'AI3FOOTBALL', 'NETSWITCH'];
-function createAdBoard(x, z, rotY, text) {
-  const boardGeo = new THREE.PlaneGeometry(12, 1.2);
+// ── Player names ──
+const homeNames = ['SALAH','FIRMINO','MANE','HENDERSON','VAN DIJK','ALEXANDER-ARNOLD','ROBERTSON','FABINHO','ALISSON','THIAGO','DIAZ'];
+const awayNames = ['HAALAND','DE BRUYNE','FODEN','RODRI','DIAS','WALKER','GREALISH','BERNARDO','EDERSON','GUNDOGAN','ALVAREZ'];
+
+// ── Scrolling ad boards (player names + branding) ──
+const adBoards = [];
+const scrollTexts = [
+  'AI3FOOTBALL',
+  ...homeNames.map(n => '#HOME ' + n),
+  'NETSWITCH ENGINE',
+  ...awayNames.map(n => '#AWAY ' + n),
+  'AI2ORBIT CO.',
+  'POWERED BY NETSWITCH v2.2.0',
+  '830 TESTS ALL PASSED'
+];
+let scrollOffset = 0;
+
+function createScrollBoard(x, z, rotY, boardIdx) {
+  const boardGeo = new THREE.PlaneGeometry(18, 1.4);
   const boardCanvas = document.createElement('canvas');
-  boardCanvas.width = 512; boardCanvas.height = 64;
-  const ctx = boardCanvas.getContext('2d');
-  ctx.fillStyle = '#0A1A0C';
-  ctx.fillRect(0, 0, 512, 64);
-  ctx.fillStyle = '#00E676';
-  ctx.font = 'bold 32px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(text, 256, 42);
+  boardCanvas.width = 1024; boardCanvas.height = 64;
   const boardTex = new THREE.CanvasTexture(boardCanvas);
-  const boardMat = new THREE.MeshStandardMaterial({ map: boardTex, emissive: 0x003300, emissiveIntensity: 0.5 });
+  const boardMat = new THREE.MeshStandardMaterial({
+    map: boardTex, emissive: 0x002200, emissiveIntensity: 0.6,
+    transparent: true, opacity: 0.95
+  });
   const board = new THREE.Mesh(boardGeo, boardMat);
-  board.position.set(x, 0.6, z);
+  board.position.set(x, 0.7, z);
   board.rotation.y = rotY;
   scene.add(board);
+  adBoards.push({ canvas: boardCanvas, tex: boardTex, idx: boardIdx });
 }
 
-for (let i = 0; i < 5; i++) {
-  createAdBoard(-40 + i * 20, -35.5, 0, adTexts[i]);
-  createAdBoard(-40 + i * 20, 35.5, Math.PI, adTexts[(i + 2) % 5]);
+function updateScrollBoards() {
+  scrollOffset += 2;
+  adBoards.forEach(b => {
+    const ctx = b.canvas.getContext('2d');
+    ctx.fillStyle = '#050F05';
+    ctx.fillRect(0, 0, 1024, 64);
+    ctx.fillStyle = '#00E676';
+    ctx.font = 'bold 28px monospace';
+    const fullText = scrollTexts.join('    ///    ');
+    const textW = ctx.measureText(fullText).width;
+    const xPos = 1024 - ((scrollOffset + b.idx * 200) % (textW + 1024));
+    ctx.fillText(fullText, xPos, 44);
+    b.tex.needsUpdate = true;
+  });
+}
+
+for (let i = 0; i < 6; i++) {
+  createScrollBoard(-45 + i * 18, -35.5, 0, i);
+  createScrollBoard(-45 + i * 18, 35.5, Math.PI, i + 6);
 }
 
 // ── Ball ──
@@ -1005,35 +1051,107 @@ const glowMat = new THREE.MeshBasicMaterial({ color: 0x00e676, transparent: true
 const ballGlow = new THREE.Mesh(glowGeo, glowMat);
 ball.add(ballGlow);
 
-// ── Players ──
+// ── Players (with body, head, legs, name labels) ──
 const playerMeshes = { home: [], away: [] };
+const playerLabels = { home: [], away: [] };
 const homeColor = 0x2979FF;
 const awayColor = 0xFF6D00;
+const skinColor = 0xDEB887;
+function createPlayerFigure(teamColor, number) {
+  const group = new THREE.Group();
+  // Body (shirt)
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.28, 0.32, 0.9, 8),
+    new THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.5 })
+  );
+  body.position.y = 1.15;
+  group.add(body);
+  // Head
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 8, 6),
+    new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.7 })
+  );
+  head.position.y = 1.82;
+  group.add(head);
+  // Shorts
+  const shorts = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3, 0.25, 0.35, 8),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6 })
+  );
+  shorts.position.y = 0.52;
+  group.add(shorts);
+  // Left leg
+  const lLeg = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.1, 0.55, 6),
+    new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.7 })
+  );
+  lLeg.position.set(-0.12, 0.15, 0);
+  group.add(lLeg);
+  // Right leg
+  const rLeg = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.1, 0.55, 6),
+    new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.7 })
+  );
+  rLeg.position.set(0.12, 0.15, 0);
+  group.add(rLeg);
+  // Number on back (small sphere as marker)
+  const numDot = new THREE.Mesh(
+    new THREE.CircleGeometry(0.12, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  numDot.position.set(0, 1.25, -0.29);
+  numDot.rotation.y = Math.PI;
+  group.add(numDot);
+  group.castShadow = true;
+  group.userData = { lLeg, rLeg, number };
+  return group;
+}
+
+function createNameLabel(name, teamColor) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 48;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 256, 48);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.roundRect(0, 0, 256, 48, 8);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 22px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(name, 128, 32);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.85 });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(3, 0.6, 1);
+  return sprite;
+}
 
 for (let i = 0; i < 11; i++) {
-  // Home
-  const hGeo = new THREE.CapsuleGeometry(0.35, 1.2, 4, 8);
-  const hMat = new THREE.MeshStandardMaterial({ color: homeColor, roughness: 0.6 });
-  const hMesh = new THREE.Mesh(hGeo, hMat);
-  hMesh.castShadow = true;
+  // Home player
+  const hMesh = createPlayerFigure(homeColor, i + 1);
   const hx = -20 + (i % 4) * 10 + (Math.random() - 0.5) * 5;
   const hz = -15 + Math.floor(i / 4) * 12 + (Math.random() - 0.5) * 5;
-  hMesh.position.set(hx, 0.95, hz);
+  hMesh.position.set(hx, 0, hz);
   scene.add(hMesh);
   playerMeshes.home.push(hMesh);
   gameState.players.home.push({ tx: hx, tz: hz });
+  const hLabel = createNameLabel(homeNames[i], homeColor);
+  hLabel.position.set(hx, 2.5, hz);
+  scene.add(hLabel);
+  playerLabels.home.push(hLabel);
 
-  // Away
-  const aGeo = new THREE.CapsuleGeometry(0.35, 1.2, 4, 8);
-  const aMat = new THREE.MeshStandardMaterial({ color: awayColor, roughness: 0.6 });
-  const aMesh = new THREE.Mesh(aGeo, aMat);
-  aMesh.castShadow = true;
+  // Away player
+  const aMesh = createPlayerFigure(awayColor, i + 1);
   const ax = 20 - (i % 4) * 10 + (Math.random() - 0.5) * 5;
   const az = -15 + Math.floor(i / 4) * 12 + (Math.random() - 0.5) * 5;
-  aMesh.position.set(ax, 0.95, az);
+  aMesh.position.set(ax, 0, az);
   scene.add(aMesh);
   playerMeshes.away.push(aMesh);
   gameState.players.away.push({ tx: ax, tz: az });
+  const aLabel = createNameLabel(awayNames[i], awayColor);
+  aLabel.position.set(ax, 2.5, az);
+  scene.add(aLabel);
+  playerLabels.away.push(aLabel);
 }
 
 // ── UI setup ──
@@ -1154,17 +1272,53 @@ function animate(time) {
   ball.rotation.x += 0.05;
   ball.rotation.z += 0.03;
 
-  // Smooth player movement
+  // Smooth player movement with leg animation and name labels
   for (let i = 0; i < 11; i++) {
     const hm = playerMeshes.home[i];
     const hp = gameState.players.home[i];
-    hm.position.x += (hp.tx - hm.position.x) * 0.04;
-    hm.position.z += (hp.tz - hm.position.z) * 0.04;
+    const hDx = hp.tx - hm.position.x;
+    const hDz = hp.tz - hm.position.z;
+    hm.position.x += hDx * 0.04;
+    hm.position.z += hDz * 0.04;
+    // Face direction of movement
+    if (Math.abs(hDx) + Math.abs(hDz) > 0.5) {
+      hm.rotation.y = Math.atan2(hDx, hDz);
+    }
+    // Leg animation (running)
+    const hSpeed = Math.sqrt(hDx * hDx + hDz * hDz);
+    if (hm.userData.lLeg && hSpeed > 0.3) {
+      hm.userData.lLeg.rotation.x = Math.sin(time * 0.008 + i) * 0.4;
+      hm.userData.rLeg.rotation.x = -Math.sin(time * 0.008 + i) * 0.4;
+    }
+    // Name label follows player
+    playerLabels.home[i].position.set(hm.position.x, 2.5, hm.position.z);
 
     const am = playerMeshes.away[i];
     const ap = gameState.players.away[i];
-    am.position.x += (ap.tx - am.position.x) * 0.04;
-    am.position.z += (ap.tz - am.position.z) * 0.04;
+    const aDx = ap.tx - am.position.x;
+    const aDz = ap.tz - am.position.z;
+    am.position.x += aDx * 0.04;
+    am.position.z += aDz * 0.04;
+    if (Math.abs(aDx) + Math.abs(aDz) > 0.5) {
+      am.rotation.y = Math.atan2(aDx, aDz);
+    }
+    if (am.userData.lLeg && Math.sqrt(aDx * aDx + aDz * aDz) > 0.3) {
+      am.userData.lLeg.rotation.x = Math.sin(time * 0.008 + i + 3) * 0.4;
+      am.userData.rLeg.rotation.x = -Math.sin(time * 0.008 + i + 3) * 0.4;
+    }
+    playerLabels.away[i].position.set(am.position.x, 2.5, am.position.z);
+  }
+
+  // Update scrolling ad boards
+  updateScrollBoards();
+
+  // Crowd wave animation (subtle swaying)
+  for (let s = 0; s < spectatorMeshes.length; s += 4) {
+    const spec = spectatorMeshes[s];
+    if (spec) {
+      spec.position.y += Math.sin(time * 0.002 + s * 0.3) * 0.001;
+      spec.rotation.z = Math.sin(time * 0.001 + s * 0.5) * 0.05;
+    }
   }
 
   // Camera
