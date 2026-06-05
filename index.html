@@ -593,7 +593,12 @@ let gameState = {
   camLoop: false,
   camLoopTimer: 0,
   players: { home: [], away: [] },
-  halfTime: false
+  halfTime: false,
+  gamePace: 0,
+  cardProbHere: 0,
+  goalProbHere: 0,
+  yellowCards: 0,
+  redCards: 0
 };
 
 // ── Force vector engine (port from C++) ──
@@ -658,7 +663,7 @@ function getMovementBias(moveId) {
 function simulateTick() {
   if (!gameState.running) return;
   gameState.tick++;
-  gameState.gameMinute = (90.0 * gameState.tick) / 900;
+  gameState.gameMinute = (90.0 * gameState.tick) / 5400;
   if (gameState.gameMinute > 90) {
     gameState.running = false;
     showEvent('FULL TIME');
@@ -752,6 +757,31 @@ function simulateTick() {
   // Sideline pull
   if (Math.abs(gameState.ballZ) > 30) {
     gameState.ballZ *= 0.9;
+  }
+
+  // Gaming pace: speed of play (meters per tick)
+  gameState.gamePace = Math.sqrt(dx * dx + dz * dz);
+
+  // Card probability at ball position
+  const distGoalNear = Math.min(
+    Math.sqrt((gameState.ballX + 52.5) ** 2 + gameState.ballZ ** 2),
+    Math.sqrt((gameState.ballX - 52.5) ** 2 + gameState.ballZ ** 2)
+  );
+  gameState.cardProbHere = distGoalNear < 5 ? 0.85 : distGoalNear < 25 ? 0.35 : 0.05;
+  gameState.goalProbHere = Math.exp(-distGoalNear / 25.0) * 0.6;
+
+  // Card events (yellow/red based on proximity and tackles)
+  if (moveId === 33 || moveId === 34) { // tackle or intercept
+    const cardRoll = footballHash(t * 11.1 + m * 7.7, 5);
+    if (cardRoll < gameState.cardProbHere * 0.15) {
+      if (distGoalNear < 5) {
+        gameState.redCards++;
+        showEvent('RED CARD!');
+      } else {
+        gameState.yellowCards++;
+        showEvent('YELLOW CARD');
+      }
+    }
   }
 
   // Move players
@@ -1286,7 +1316,7 @@ function launchMatch(match, contName) {
 
 // ── Animation loop ──
 let lastSimTime = 0;
-const SIM_INTERVAL = 500; // ms per tick (900 ticks = ~7.5 min match)
+const SIM_INTERVAL = 1000; // 1 tick per second, real-time 90 min (5400 ticks)
 
 function animate(time) {
   requestAnimationFrame(animate);
@@ -1344,6 +1374,9 @@ function animate(time) {
   // Update scrolling ad boards
   updateScrollBoards();
 
+  // Update live probability numbers on field
+  updateLiveOdds();
+
   // Crowd wave animation (subtle swaying)
   for (let s = 0; s < spectatorMeshes.length; s += 4) {
     const spec = spectatorMeshes[s];
@@ -1390,7 +1423,7 @@ function animate(time) {
     document.getElementById('infoMove').textContent = `#${gameState.moveId}`;
 
     document.getElementById('statsTicker').textContent =
-      `TICKS: ${gameState.tick} | DISTANCE: ${Math.floor(gameState.totalMeters)}m | BOUNCES: ${gameState.bounces} | FORCE DIR: ${gameState.forceDir} | MOVE: ${MOVE_NAMES[gameState.moveId]}`;
+      `TICKS: ${gameState.tick} | DIST: ${Math.floor(gameState.totalMeters)}m | PACE: ${(gameState.gamePace * 60).toFixed(1)} | GOAL: ${(gameState.goalProbHere * 100).toFixed(0)}% | CARD: ${(gameState.cardProbHere * 100).toFixed(0)}% | YC: ${gameState.yellowCards} RC: ${gameState.redCards} | ${MOVE_NAMES[gameState.moveId]}`;
   }
 
   // Ball glow pulse
@@ -1400,6 +1433,149 @@ function animate(time) {
 }
 
 requestAnimationFrame(animate);
+
+// ── Live probability sprites on field (always visible during play) ──
+const liveOddsGroup = new THREE.Group();
+scene.add(liveOddsGroup);
+const liveOddsSprites = [];
+const LIVE_GRID = 10;
+
+function makeLiveLabel() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 48;
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.8 });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(3.5, 1.2, 1);
+  sprite.userData = { canvas: c, tex: tex };
+  return sprite;
+}
+
+// Create grid of live odds sprites
+for (let gx = -50; gx <= 50; gx += LIVE_GRID) {
+  for (let gz = -30; gz <= 30; gz += LIVE_GRID) {
+    const sprite = makeLiveLabel();
+    sprite.position.set(gx, 0.4, gz);
+    liveOddsGroup.add(sprite);
+    liveOddsSprites.push({ sprite, baseX: gx, baseZ: gz });
+  }
+}
+
+// Per-player force/direction labels
+const playerForceLabels = { home: [], away: [] };
+for (let i = 0; i < 11; i++) {
+  const hf = makeLiveLabel();
+  hf.scale.set(3, 0.8, 1);
+  scene.add(hf);
+  playerForceLabels.home.push(hf);
+  const af = makeLiveLabel();
+  af.scale.set(3, 0.8, 1);
+  scene.add(af);
+  playerForceLabels.away.push(af);
+}
+
+// Gaming pace display sprite
+const paceSprite = makeLiveLabel();
+paceSprite.scale.set(8, 1.5, 1);
+paceSprite.position.set(0, 4, -33);
+scene.add(paceSprite);
+
+function updateLiveOdds() {
+  if (!gameState.running && gameState.tick === 0) return;
+
+  // Update odds at each grid point based on current ball position
+  liveOddsSprites.forEach(item => {
+    const { sprite, baseX, baseZ } = item;
+    const c = sprite.userData.canvas;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, 128, 48);
+
+    // Calculate live odds relative to ball
+    const distBall = Math.sqrt((baseX - gameState.ballX) ** 2 + (baseZ - gameState.ballZ) ** 2);
+    const distGoalL = Math.sqrt((baseX + 52.5) ** 2 + baseZ * baseZ);
+    const distGoalR = Math.sqrt((baseX - 52.5) ** 2 + baseZ * baseZ);
+    const distGoal = Math.min(distGoalL, distGoalR);
+
+    const goalP = (Math.exp(-distGoal / 25.0) * 60).toFixed(0);
+    const cardP = distGoal < 5 ? '85' : distGoal < 25 ? '35' : '5';
+    const action = distBall < 15 ? (Math.exp(-distBall / 10) * 100).toFixed(0) : '';
+
+    // Color by zone
+    const isRed = distGoal < 8;
+    const isYellow = distGoal < 25;
+    ctx.fillStyle = isRed ? '#ff3333' : isYellow ? '#ffcc00' : '#00dd66';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(goalP + '%', 64, 16);
+
+    // Show action probability near ball
+    if (action) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '11px monospace';
+      ctx.fillText('A:' + action, 64, 32);
+    }
+
+    // Card probability
+    ctx.fillStyle = isRed ? '#ff6666' : '#ffaa00';
+    ctx.font = '10px monospace';
+    ctx.fillText('C:' + cardP, 64, 44);
+
+    sprite.userData.tex.needsUpdate = true;
+  });
+
+  // Update per-player force labels
+  for (let i = 0; i < 11; i++) {
+    const hm = playerMeshes.home[i];
+    const hfl = playerForceLabels.home[i];
+    const hc = hfl.userData.canvas;
+    const hctx = hc.getContext('2d');
+    hctx.clearRect(0, 0, 128, 48);
+    const hDist = Math.sqrt((hm.position.x - gameState.ballX) ** 2 + (hm.position.z - gameState.ballZ) ** 2);
+    const hForce = (gameState.force * 1e6 * Math.exp(-hDist / 30)).toFixed(1);
+    hctx.fillStyle = '#6699ff';
+    hctx.font = 'bold 12px monospace';
+    hctx.textAlign = 'center';
+    hctx.fillText('F:' + hForce, 64, 16);
+    hctx.fillStyle = '#aaccff';
+    hctx.font = '10px monospace';
+    hctx.fillText('d:' + hDist.toFixed(0) + 'm', 64, 32);
+    hfl.userData.tex.needsUpdate = true;
+    hfl.position.set(hm.position.x, 2.2, hm.position.z);
+
+    const am = playerMeshes.away[i];
+    const afl = playerForceLabels.away[i];
+    const ac = afl.userData.canvas;
+    const actx = ac.getContext('2d');
+    actx.clearRect(0, 0, 128, 48);
+    const aDist = Math.sqrt((am.position.x - gameState.ballX) ** 2 + (am.position.z - gameState.ballZ) ** 2);
+    const aForce = (gameState.force * 1e6 * Math.exp(-aDist / 30)).toFixed(1);
+    actx.fillStyle = '#ff9944';
+    actx.font = 'bold 12px monospace';
+    actx.textAlign = 'center';
+    actx.fillText('F:' + aForce, 64, 16);
+    actx.fillStyle = '#ffcc88';
+    actx.font = '10px monospace';
+    actx.fillText('d:' + aDist.toFixed(0) + 'm', 64, 32);
+    afl.userData.tex.needsUpdate = true;
+    afl.position.set(am.position.x, 2.2, am.position.z);
+  }
+
+  // Gaming pace display
+  const pc = paceSprite.userData.canvas;
+  const pctx = pc.getContext('2d');
+  pctx.clearRect(0, 0, 128, 48);
+  pctx.fillStyle = '#00ffaa';
+  pctx.font = 'bold 13px monospace';
+  pctx.textAlign = 'center';
+  const pace = (gameState.gamePace * 60).toFixed(1);
+  const gp = (gameState.goalProbHere * 100).toFixed(0);
+  const cp = (gameState.cardProbHere * 100).toFixed(0);
+  pctx.fillText('PACE:' + pace + ' GOAL:' + gp + '% CARD:' + cp + '% YC:' + gameState.yellowCards + ' RC:' + gameState.redCards, 64, 20);
+  pctx.fillStyle = '#88ffcc';
+  pctx.font = '10px monospace';
+  pctx.fillText('Move:#' + gameState.moveId + ' ' + gameState.forceDir + ' F:' + (gameState.force * 1e9).toFixed(2), 64, 38);
+  paceSprite.userData.tex.needsUpdate = true;
+}
 
 // ── Dev View (Shift+2) - odds at every spot on field ──
 let devViewActive = false;
