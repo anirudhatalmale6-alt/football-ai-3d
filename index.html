@@ -735,6 +735,13 @@ function simulateTick() {
   if (!gameState.running) return;
   gameState.tick++;
   gameState.gameMinute = (90.0 * gameState.tick) / 5400;
+
+  // Countdown: 45:00 -> 00:00 per half
+  const isSecondHalf = gameState.gameMinute >= 45;
+  const halfMinute = isSecondHalf ? 90 - gameState.gameMinute : 45 - gameState.gameMinute;
+  gameState.countdown = Math.max(0, halfMinute);
+  gameState.halfLabel = isSecondHalf ? '2ND' : '1ST';
+
   if (gameState.gameMinute > 90) {
     gameState.running = false;
     showEvent('FULL TIME');
@@ -744,6 +751,8 @@ function simulateTick() {
   if (gameState.gameMinute >= 45 && !gameState.halfTime) {
     gameState.halfTime = true;
     showEvent('HALF TIME');
+    // Reset positions for second half (swap sides)
+    gameState.ballX = 0; gameState.ballZ = 0;
   }
 
   const t = gameState.tick;
@@ -1468,38 +1477,85 @@ function updateReferee() {
   refereeLabel.position.set(refereeMesh.position.x, 2.5, refereeMesh.position.z);
 }
 
-// Update card risk per player (exponent of distance to nearest goalie)
+// Full position-influence recalculation
+// Every entity's numbers depend on ALL other entities' positions
 function updateCardRisks() {
+  // Collect all positions: 11 home + 11 away + referee + ball
+  const allPos = [];
   for (let i = 0; i < 11; i++) {
-    // Home players - risk near AWAY goal (x=52.5)
+    allPos.push({ x: playerMeshes.home[i].position.x, z: playerMeshes.home[i].position.z, team: 'H', idx: i });
+    allPos.push({ x: playerMeshes.away[i].position.x, z: playerMeshes.away[i].position.z, team: 'A', idx: i });
+  }
+  allPos.push({ x: refereeMesh.position.x, z: refereeMesh.position.z, team: 'R', idx: 0 });
+  const ballPos = { x: gameState.ballX, z: gameState.ballZ };
+
+  // Count nearby players for each entity (crowding increases card risk)
+  function countNearby(px, pz, radius) {
+    let count = 0;
+    allPos.forEach(p => {
+      const d = Math.sqrt((p.x - px) ** 2 + (p.z - pz) ** 2);
+      if (d < radius && d > 0.5) count++;
+    });
+    return count;
+  }
+
+  for (let i = 0; i < 11; i++) {
+    // HOME PLAYER - influenced by all positions
     const hm = playerMeshes.home[i];
     const hDistGoal = Math.sqrt((hm.position.x - 52.5) ** 2 + hm.position.z ** 2);
-    const hRisk = Math.exp(-hDistGoal / 15.0);
+    const hDistBall = Math.sqrt((hm.position.x - ballPos.x) ** 2 + (hm.position.z - ballPos.z) ** 2);
+    const hDistRef = Math.sqrt((hm.position.x - refereeMesh.position.x) ** 2 + (hm.position.z - refereeMesh.position.z) ** 2);
+    const hNearby = countNearby(hm.position.x, hm.position.z, 8);
+    const hGoalieDistToMe = Math.sqrt((hm.position.x - playerMeshes.away[0].position.x) ** 2 + (hm.position.z - playerMeshes.away[0].position.z) ** 2);
+
+    // Card risk = f(goal distance, nearby players, referee distance, goalie proximity)
+    const hBaseRisk = Math.exp(-hDistGoal / 15.0);
+    const hCrowdMod = 1.0 + hNearby * 0.08;
+    const hRefMod = hDistRef < 15 ? 1.3 : 1.0;
+    const hGoalieMod = Math.exp(-hGoalieDistToMe / 20.0);
+    const hRisk = Math.min(0.99, hBaseRisk * hCrowdMod * hRefMod * (1 + hGoalieMod));
     const hCardType = hDistGoal < 5 ? 'R' : hDistGoal < 25 ? 'Y' : '-';
+
     const hcr = cardRiskLabels.home[i];
     const hc = hcr.userData.canvas;
     const hctx = hc.getContext('2d');
     hctx.clearRect(0, 0, 128, 48);
     hctx.fillStyle = hCardType === 'R' ? '#ff3333' : hCardType === 'Y' ? '#ffcc00' : '#44ff44';
-    hctx.font = 'bold 11px monospace';
+    hctx.font = 'bold 10px monospace';
     hctx.textAlign = 'center';
-    hctx.fillText(hCardType + ':' + (hRisk * 100).toFixed(0) + '% d:' + hDistGoal.toFixed(0), 64, 16);
+    hctx.fillText(hCardType + ':' + (hRisk * 100).toFixed(0) + '% n:' + hNearby, 64, 14);
+    hctx.fillStyle = '#aaaaaa';
+    hctx.font = '9px monospace';
+    hctx.fillText('g:' + hDistGoal.toFixed(0) + ' b:' + hDistBall.toFixed(0) + ' r:' + hDistRef.toFixed(0), 64, 28);
     hcr.userData.tex.needsUpdate = true;
     hcr.position.set(hm.position.x, 1.6, hm.position.z);
 
-    // Away players - risk near HOME goal (x=-52.5)
+    // AWAY PLAYER - same calculation mirrored
     const am = playerMeshes.away[i];
     const aDistGoal = Math.sqrt((am.position.x + 52.5) ** 2 + am.position.z ** 2);
-    const aRisk = Math.exp(-aDistGoal / 15.0);
+    const aDistBall = Math.sqrt((am.position.x - ballPos.x) ** 2 + (am.position.z - ballPos.z) ** 2);
+    const aDistRef = Math.sqrt((am.position.x - refereeMesh.position.x) ** 2 + (am.position.z - refereeMesh.position.z) ** 2);
+    const aNearby = countNearby(am.position.x, am.position.z, 8);
+    const aGoalieDistToMe = Math.sqrt((am.position.x - playerMeshes.home[0].position.x) ** 2 + (am.position.z - playerMeshes.home[0].position.z) ** 2);
+
+    const aBaseRisk = Math.exp(-aDistGoal / 15.0);
+    const aCrowdMod = 1.0 + aNearby * 0.08;
+    const aRefMod = aDistRef < 15 ? 1.3 : 1.0;
+    const aGoalieMod = Math.exp(-aGoalieDistToMe / 20.0);
+    const aRisk = Math.min(0.99, aBaseRisk * aCrowdMod * aRefMod * (1 + aGoalieMod));
     const aCardType = aDistGoal < 5 ? 'R' : aDistGoal < 25 ? 'Y' : '-';
+
     const acr = cardRiskLabels.away[i];
     const ac = acr.userData.canvas;
     const actx = ac.getContext('2d');
     actx.clearRect(0, 0, 128, 48);
     actx.fillStyle = aCardType === 'R' ? '#ff3333' : aCardType === 'Y' ? '#ffcc00' : '#44ff44';
-    actx.font = 'bold 11px monospace';
+    actx.font = 'bold 10px monospace';
     actx.textAlign = 'center';
-    actx.fillText(aCardType + ':' + (aRisk * 100).toFixed(0) + '% d:' + aDistGoal.toFixed(0), 64, 16);
+    actx.fillText(aCardType + ':' + (aRisk * 100).toFixed(0) + '% n:' + aNearby, 64, 14);
+    actx.fillStyle = '#aaaaaa';
+    actx.font = '9px monospace';
+    actx.fillText('g:' + aDistGoal.toFixed(0) + ' b:' + aDistBall.toFixed(0) + ' r:' + aDistRef.toFixed(0), 64, 28);
     acr.userData.tex.needsUpdate = true;
     acr.position.set(am.position.x, 1.6, am.position.z);
   }
@@ -1702,10 +1758,11 @@ function animate(time) {
 
   // Update UI
   if (gameState.running || gameState.tick > 0) {
-    const mins = Math.floor(gameState.gameMinute);
-    const secs = Math.floor((gameState.gameMinute % 1) * 60);
-    document.getElementById('matchTime').textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    document.getElementById('halfLabel').textContent = gameState.gameMinute < 45 ? '1ST' : '2ND';
+    const cd = gameState.countdown || 0;
+    const cdMins = Math.floor(cd);
+    const cdSecs = Math.floor((cd % 1) * 60);
+    document.getElementById('matchTime').textContent = `${cdMins.toString().padStart(2, '0')}:${cdSecs.toString().padStart(2, '0')}`;
+    document.getElementById('halfLabel').textContent = gameState.halfLabel || '1ST';
     document.getElementById('homeScore').textContent = gameState.homeGoals;
     document.getElementById('awayScore').textContent = gameState.awayGoals;
 
