@@ -607,6 +607,77 @@ let gameState = {
 // 25 numbers per square inch of game field.
 // ══════════════════════════════════════════════════════════════════
 
+// ── Device Performance Auto-Tuning ──
+const deviceProfile = {
+  platform: 'unknown',
+  cores: navigator.hardwareConcurrency || 4,
+  memory: navigator.deviceMemory || 4,
+  gpu: 'unknown',
+  maxSprites: 200,
+  crowdDetail: 1.0,
+  targetFPS: 60,
+  drawDistance: 160,
+  augustinRatio: 0,
+  performancePct: 100
+};
+
+// Detect platform and tune
+(function detectDevice() {
+  const ua = navigator.userAgent;
+  if (/Android/i.test(ua)) deviceProfile.platform = 'Android';
+  else if (/iPhone|iPad/i.test(ua)) deviceProfile.platform = 'iOS';
+  else if (/Mac/i.test(ua)) deviceProfile.platform = 'Mac';
+  else if (/Linux/i.test(ua)) deviceProfile.platform = 'Unix';
+  else if (/Win/i.test(ua)) deviceProfile.platform = 'Windows';
+
+  // Augustin calc maps hardware to performance ratio
+  deviceProfile.augustinRatio = augustinCalc(deviceProfile.memory, deviceProfile.cores, 2.5);
+  deviceProfile.performancePct = Math.round(deviceProfile.augustinRatio * 100);
+
+  // Tune based on Augustin ratio
+  if (deviceProfile.augustinRatio > 0.9) {
+    // High-end: full quality
+    deviceProfile.maxSprites = 200;
+    deviceProfile.crowdDetail = 1.0;
+    deviceProfile.targetFPS = 60;
+    deviceProfile.drawDistance = 160;
+  } else if (deviceProfile.augustinRatio > 0.6) {
+    // Mid: reduce crowd, keep field numbers
+    deviceProfile.maxSprites = 120;
+    deviceProfile.crowdDetail = 0.6;
+    deviceProfile.targetFPS = 45;
+    deviceProfile.drawDistance = 120;
+  } else {
+    // Low: mobile/lightweight
+    deviceProfile.maxSprites = 60;
+    deviceProfile.crowdDetail = 0.3;
+    deviceProfile.targetFPS = 30;
+    deviceProfile.drawDistance = 80;
+  }
+
+  console.log('NetSwitch Device Profile:', deviceProfile.platform,
+    'cores=' + deviceProfile.cores, 'mem=' + deviceProfile.memory + 'GB',
+    'augustin=' + deviceProfile.augustinRatio.toFixed(3),
+    'perf=' + deviceProfile.performancePct + '%',
+    'fps=' + deviceProfile.targetFPS);
+})();
+
+// ── Advert Board Positions (influence gameplay near sidelines) ──
+const adBoardPositions = [];
+for (let i = 0; i < 6; i++) {
+  adBoardPositions.push({ x: -45 + i * 18, z: -35.5 });
+  adBoardPositions.push({ x: -45 + i * 18, z: 35.5 });
+}
+
+function advertInfluence(x, z) {
+  let influence = 0;
+  adBoardPositions.forEach(ad => {
+    const d = Math.sqrt((x - ad.x) ** 2 + (z - ad.z) ** 2);
+    if (d < 12) influence += Math.exp(-d / 5.0) * 15;
+  });
+  return influence;
+}
+
 // NetSwitch AI: single entry point. Feed position, get 25 values back.
 function netswitchAI(x, z, allPlayers, ballX, ballZ, refX, refZ, tick) {
   const bxN = (x + 52.5) / 105.0;
@@ -624,18 +695,24 @@ function netswitchAI(x, z, allPlayers, ballX, ballZ, refX, refZ, tick) {
     if (d < 10 && d > 0.3) { nearby++; if (p.team === 'H') nearbyHome++; else nearbyAway++; }
   });
 
+  // Advert board influence on this position
+  const adInfluence = advertInfluence(x, z);
+
+  // Device performance modifier (Augustin-tuned)
+  const perfMod = deviceProfile.augustinRatio;
+
   // 25 numbers for this position
   return {
     // 1-5: Location
-    n1_goalProbL: Math.exp(-distGoalL / 25.0) * 60,
-    n2_goalProbR: Math.exp(-distGoalR / 25.0) * 60,
-    n3_cardRisk: distGoalMin < 5 ? 85 : distGoalMin < 25 ? 35 : 5,
+    n1_goalProbL: Math.exp(-distGoalL / 25.0) * 60 * (1 + adInfluence * 0.01),
+    n2_goalProbR: Math.exp(-distGoalR / 25.0) * 60 * (1 + adInfluence * 0.01),
+    n3_cardRisk: (distGoalMin < 5 ? 85 : distGoalMin < 25 ? 35 : 5) + adInfluence * 0.5,
     n4_zoneFrac: Math.abs(zoneSignal(bxN, bzN, Math.abs(bxN - 0.5) < 0.15)) * 100,
     n5_quadrant: bxN < 0.5 ? (bzN < 0.5 ? 1 : 2) : (bzN > 0.5 ? 3 : 4),
 
     // 6-10: Ball influence
     n6_distBall: distBall,
-    n7_ballForce: Math.exp(-distBall / 10.0) * 100,
+    n7_ballForce: Math.exp(-distBall / 10.0) * 100 * perfMod,
     n8_laplaceA: laplaceZone(bxN, true) * 1000,
     n9_laplaceB: laplaceZone(bxN, false) * 1000,
     n10_trigChain: (1 + trigChain(bxN, bzN, 0.5)) * 50,
@@ -644,7 +721,7 @@ function netswitchAI(x, z, allPlayers, ballX, ballZ, refX, refZ, tick) {
     n11_nearby: nearby,
     n12_nearbyHome: nearbyHome,
     n13_nearbyAway: nearbyAway,
-    n14_crowdRisk: nearby * 8,
+    n14_crowdRisk: nearby * 8 + adInfluence * 0.3,
     n15_switchFactor: playerSwitchFactor(bxN) * 100,
 
     // 16-20: Referee & cards
@@ -654,12 +731,12 @@ function netswitchAI(x, z, allPlayers, ballX, ballZ, refX, refZ, tick) {
     n19_ockTima: ockTima(bxN, 0) * 1000,
     n20_poleProbL: poleHitProb(45, true) * 10000,
 
-    // 21-25: Performance & surface
-    n21_augustin: augustinCalc(64, 16, 3.5) * 100,
+    // 21-25: Performance, surface & adverts
+    n21_augustin: perfMod * 100,
     n22_terracotta: terracottaCalc(100, 75, 3) * 100,
     n23_surfaceMod: surfaceModifier(0) * 10,
-    n24_gamePace: (tick > 0 ? tick / 60 : 0),
-    n25_overallScore: (Math.exp(-distGoalMin / 25.0) * 60 + Math.exp(-distBall / 10.0) * 40) * (1 + nearby * 0.05)
+    n24_adInfluence: adInfluence,
+    n25_overallScore: (Math.exp(-distGoalMin / 25.0) * 60 + Math.exp(-distBall / 10.0) * 40) * (1 + nearby * 0.05) * (1 + adInfluence * 0.005) * perfMod
   };
 }
 
@@ -898,6 +975,12 @@ function simulateTick() {
     gameState.ballX += (gameState.ballX > 0 ? 1 : -1) * ockInfluence * 3.0;
   }
 
+  // Advert board influence - ball near sideline boards gets pushed back
+  const adInf = advertInfluence(gameState.ballX, gameState.ballZ);
+  if (adInf > 5) {
+    gameState.ballZ *= (1.0 - adInf * 0.002);
+  }
+
   // Clamp
   gameState.ballX = Math.max(-52.5, Math.min(52.5, gameState.ballX));
   gameState.ballZ = Math.max(-34, Math.min(34, gameState.ballZ));
@@ -1073,7 +1156,7 @@ renderer.toneMappingExposure = 1.1;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x030803);
-scene.fog = new THREE.Fog(0x030803, 80, 160);
+scene.fog = new THREE.Fog(0x030803, 80, deviceProfile.drawDistance);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 300);
 camera.position.set(0, 18, 60);
@@ -1986,23 +2069,21 @@ function updateLiveOdds() {
     afl.position.set(am.position.x, 2.2, am.position.z);
   }
 
-  // Gaming pace display with all formula outputs
+  // Gaming pace with device profile and ad influence
   const pc = paceSprite.userData.canvas;
   const pctx = pc.getContext('2d');
   pctx.clearRect(0, 0, 128, 48);
   pctx.fillStyle = '#00ffaa';
-  pctx.font = 'bold 11px monospace';
+  pctx.font = 'bold 10px monospace';
   pctx.textAlign = 'center';
   const pace = (gameState.gamePace * 60).toFixed(1);
   const gp = (gameState.goalProbHere * 100).toFixed(0);
   const cp = (gameState.cardProbHere * 100).toFixed(0);
-  const bxN = (gameState.ballX + 52.5) / 105;
-  const ock = (ockTima(bxN, gameState.homeGoals + gameState.awayGoals) * 100).toFixed(1);
-  const aug = augustinCalc(64, 16, 3.5).toFixed(3);
-  pctx.fillText('PACE:' + pace + ' G:' + gp + '% C:' + cp + '% Ock:' + ock + ' Aug:' + aug, 64, 16);
+  const adI = advertInfluence(gameState.ballX, gameState.ballZ).toFixed(0);
+  pctx.fillText(deviceProfile.platform + ' ' + deviceProfile.performancePct + '% | PACE:' + pace + ' G:' + gp + '% C:' + cp + '% Ad:' + adI, 64, 14);
   pctx.fillStyle = '#88ffcc';
   pctx.font = '9px monospace';
-  pctx.fillText('#' + gameState.moveId + ' ' + gameState.forceDir + ' YC:' + gameState.yellowCards + ' RC:' + gameState.redCards + ' Lp:' + laplaceZone(bxN, true).toFixed(2), 64, 34);
+  pctx.fillText('#' + gameState.moveId + ' ' + gameState.forceDir + ' YC:' + gameState.yellowCards + ' RC:' + gameState.redCards + ' cores:' + deviceProfile.cores + ' fps:' + deviceProfile.targetFPS, 64, 30);
   paceSprite.userData.tex.needsUpdate = true;
 }
 
