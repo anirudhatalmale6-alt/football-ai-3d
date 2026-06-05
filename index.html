@@ -1126,11 +1126,41 @@ function createNameLabel(name, teamColor) {
   return sprite;
 }
 
+// 4-4-2 formation: spread side by side across width
+// Home: GK, 4 defenders, 4 midfield, 2 forwards (left half)
+const homeFormation = [
+  { x: -48, z: 0 },     // GK
+  { x: -35, z: -22 },   // LB
+  { x: -35, z: -8 },    // CB
+  { x: -35, z: 8 },     // CB
+  { x: -35, z: 22 },    // RB
+  { x: -20, z: -24 },   // LM
+  { x: -20, z: -8 },    // CM
+  { x: -20, z: 8 },     // CM
+  { x: -20, z: 24 },    // RM
+  { x: -8, z: -10 },    // ST
+  { x: -8, z: 10 },     // ST
+];
+// Away: mirror formation (right half)
+const awayFormation = [
+  { x: 48, z: 0 },
+  { x: 35, z: 22 },
+  { x: 35, z: 8 },
+  { x: 35, z: -8 },
+  { x: 35, z: -22 },
+  { x: 20, z: 24 },
+  { x: 20, z: 8 },
+  { x: 20, z: -8 },
+  { x: 20, z: -24 },
+  { x: 8, z: 10 },
+  { x: 8, z: -10 },
+];
+
 for (let i = 0; i < 11; i++) {
-  // Home player
+  // Home player - side by side formation
   const hMesh = createPlayerFigure(homeColor, i + 1);
-  const hx = -20 + (i % 4) * 10 + (Math.random() - 0.5) * 5;
-  const hz = -15 + Math.floor(i / 4) * 12 + (Math.random() - 0.5) * 5;
+  const hx = homeFormation[i].x;
+  const hz = homeFormation[i].z;
   hMesh.position.set(hx, 0, hz);
   scene.add(hMesh);
   playerMeshes.home.push(hMesh);
@@ -1140,10 +1170,10 @@ for (let i = 0; i < 11; i++) {
   scene.add(hLabel);
   playerLabels.home.push(hLabel);
 
-  // Away player
+  // Away player - mirror formation
   const aMesh = createPlayerFigure(awayColor, i + 1);
-  const ax = 20 - (i % 4) * 10 + (Math.random() - 0.5) * 5;
-  const az = -15 + Math.floor(i / 4) * 12 + (Math.random() - 0.5) * 5;
+  const ax = awayFormation[i].x;
+  const az = awayFormation[i].z;
   aMesh.position.set(ax, 0, az);
   scene.add(aMesh);
   playerMeshes.away.push(aMesh);
@@ -1411,15 +1441,28 @@ function makeOddsLabel(text, color) {
 function buildDevView() {
   while (devGroup.children.length > 0) devGroup.remove(devGroup.children[0]);
 
-  // Odds numbers at every 10m grid
-  for (let gx = -50; gx <= 50; gx += 8) {
-    for (let gz = -30; gz <= 30; gz += 8) {
+  // Dense odds numbers across entire field (every 6m)
+  for (let gx = -50; gx <= 50; gx += 6) {
+    for (let gz = -30; gz <= 30; gz += 6) {
       const odds = fieldOdds(gx, gz);
       const val = (odds.total * 100).toFixed(1);
       const color = odds.card > 0.5 ? '#ff4444' : odds.card > 0.2 ? '#ffcc00' : '#00ff88';
       const label = makeOddsLabel(val, color);
       label.position.set(gx, 0.3, gz);
+      label.scale.set(3, 0.7, 1);
       devGroup.add(label);
+    }
+  }
+
+  // Foul severity numbers (smaller, between odds)
+  for (let gx = -47; gx <= 47; gx += 12) {
+    for (let gz = -27; gz <= 27; gz += 12) {
+      const dist = Math.min(Math.sqrt((gx+52.5)*(gx+52.5)+gz*gz), Math.sqrt((gx-52.5)*(gx-52.5)+gz*gz));
+      const sev = dist < 5 ? '180' : dist < 15 ? '170' : dist < 25 ? '165' : dist < 35 ? '145' : '133';
+      const sevLabel = makeOddsLabel('S:'+sev, '#ff8844');
+      sevLabel.position.set(gx, 0.6, gz);
+      sevLabel.scale.set(2.5, 0.6, 1);
+      devGroup.add(sevLabel);
     }
   }
 
