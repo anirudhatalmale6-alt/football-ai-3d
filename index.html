@@ -601,6 +601,79 @@ let gameState = {
   redCards: 0
 };
 
+// ══════════════════════════════════════════════════════════════════
+// NETSWITCH AI ENGINE - Central switch router for all game traffic
+// All AI calls go through netswitchAI(). Values returned per position.
+// 25 numbers per square inch of game field.
+// ══════════════════════════════════════════════════════════════════
+
+// NetSwitch AI: single entry point. Feed position, get 25 values back.
+function netswitchAI(x, z, allPlayers, ballX, ballZ, refX, refZ, tick) {
+  const bxN = (x + 52.5) / 105.0;
+  const bzN = (z + 34) / 68.0;
+  const distGoalL = Math.sqrt((x + 52.5) ** 2 + z * z);
+  const distGoalR = Math.sqrt((x - 52.5) ** 2 + z * z);
+  const distGoalMin = Math.min(distGoalL, distGoalR);
+  const distBall = Math.sqrt((x - ballX) ** 2 + (z - ballZ) ** 2);
+  const distRef = Math.sqrt((x - refX) ** 2 + (z - refZ) ** 2);
+
+  // Count nearby entities
+  let nearby = 0, nearbyHome = 0, nearbyAway = 0;
+  allPlayers.forEach(p => {
+    const d = Math.sqrt((p.x - x) ** 2 + (p.z - z) ** 2);
+    if (d < 10 && d > 0.3) { nearby++; if (p.team === 'H') nearbyHome++; else nearbyAway++; }
+  });
+
+  // 25 numbers for this position
+  return {
+    // 1-5: Location
+    n1_goalProbL: Math.exp(-distGoalL / 25.0) * 60,
+    n2_goalProbR: Math.exp(-distGoalR / 25.0) * 60,
+    n3_cardRisk: distGoalMin < 5 ? 85 : distGoalMin < 25 ? 35 : 5,
+    n4_zoneFrac: Math.abs(zoneSignal(bxN, bzN, Math.abs(bxN - 0.5) < 0.15)) * 100,
+    n5_quadrant: bxN < 0.5 ? (bzN < 0.5 ? 1 : 2) : (bzN > 0.5 ? 3 : 4),
+
+    // 6-10: Ball influence
+    n6_distBall: distBall,
+    n7_ballForce: Math.exp(-distBall / 10.0) * 100,
+    n8_laplaceA: laplaceZone(bxN, true) * 1000,
+    n9_laplaceB: laplaceZone(bxN, false) * 1000,
+    n10_trigChain: (1 + trigChain(bxN, bzN, 0.5)) * 50,
+
+    // 11-15: Player density
+    n11_nearby: nearby,
+    n12_nearbyHome: nearbyHome,
+    n13_nearbyAway: nearbyAway,
+    n14_crowdRisk: nearby * 8,
+    n15_switchFactor: playerSwitchFactor(bxN) * 100,
+
+    // 16-20: Referee & cards
+    n16_distRef: distRef,
+    n17_refInfluence: distRef < 15 ? 130 : 100,
+    n18_foulSeverity: distGoalMin < 5 ? 180 : distGoalMin < 15 ? 170 : distGoalMin < 25 ? 165 : distGoalMin < 35 ? 145 : 133,
+    n19_ockTima: ockTima(bxN, 0) * 1000,
+    n20_poleProbL: poleHitProb(45, true) * 10000,
+
+    // 21-25: Performance & surface
+    n21_augustin: augustinCalc(64, 16, 3.5) * 100,
+    n22_terracotta: terracottaCalc(100, 75, 3) * 100,
+    n23_surfaceMod: surfaceModifier(0) * 10,
+    n24_gamePace: (tick > 0 ? tick / 60 : 0),
+    n25_overallScore: (Math.exp(-distGoalMin / 25.0) * 60 + Math.exp(-distBall / 10.0) * 40) * (1 + nearby * 0.05)
+  };
+}
+
+// Route game traffic through NetSwitch - returns action for entity
+function netswitchRoute(entityType, entityIdx, allPlayers, ballX, ballZ, refX, refZ, tick) {
+  let pos;
+  if (entityType === 'home') pos = { x: playerMeshes.home[entityIdx].position.x, z: playerMeshes.home[entityIdx].position.z };
+  else if (entityType === 'away') pos = { x: playerMeshes.away[entityIdx].position.x, z: playerMeshes.away[entityIdx].position.z };
+  else if (entityType === 'ref') pos = { x: refX, z: refZ };
+  else pos = { x: ballX, z: ballZ };
+
+  return netswitchAI(pos.x, pos.z, allPlayers, ballX, ballZ, refX, refZ, tick);
+}
+
 // ── Force vector engine (all math from recordings) ──
 function footballHash(x, depth) {
   let val = x;
@@ -1835,79 +1908,80 @@ scene.add(paceSprite);
 function updateLiveOdds() {
   if (!gameState.running && gameState.tick === 0) return;
 
-  // Update odds at each grid point based on current ball position
+  // Collect all player positions for NetSwitch AI
+  const allPlayers = [];
+  for (let i = 0; i < 11; i++) {
+    allPlayers.push({ x: playerMeshes.home[i].position.x, z: playerMeshes.home[i].position.z, team: 'H' });
+    allPlayers.push({ x: playerMeshes.away[i].position.x, z: playerMeshes.away[i].position.z, team: 'A' });
+  }
+
+  // Update each grid point through NetSwitch AI (25 numbers per spot)
   liveOddsSprites.forEach(item => {
     const { sprite, baseX, baseZ } = item;
     const c = sprite.userData.canvas;
     const ctx = c.getContext('2d');
     ctx.clearRect(0, 0, 128, 48);
 
-    // Calculate live odds relative to ball
-    const distBall = Math.sqrt((baseX - gameState.ballX) ** 2 + (baseZ - gameState.ballZ) ** 2);
-    const distGoalL = Math.sqrt((baseX + 52.5) ** 2 + baseZ * baseZ);
-    const distGoalR = Math.sqrt((baseX - 52.5) ** 2 + baseZ * baseZ);
-    const distGoal = Math.min(distGoalL, distGoalR);
+    // Route through NetSwitch AI - get all 25 numbers
+    const ns = netswitchAI(baseX, baseZ, allPlayers, gameState.ballX, gameState.ballZ,
+                           refereeMesh.position.x, refereeMesh.position.z, gameState.tick);
 
-    const goalP = (Math.exp(-distGoal / 25.0) * 60).toFixed(0);
-    const cardP = distGoal < 5 ? '85' : distGoal < 25 ? '35' : '5';
-    const action = distBall < 15 ? (Math.exp(-distBall / 10) * 100).toFixed(0) : '';
-
-    // Color by zone
-    const isRed = distGoal < 8;
-    const isYellow = distGoal < 25;
+    // Display key numbers (color by card risk)
+    const isRed = ns.n3_cardRisk > 50;
+    const isYellow = ns.n3_cardRisk > 20;
     ctx.fillStyle = isRed ? '#ff3333' : isYellow ? '#ffcc00' : '#00dd66';
-    ctx.font = 'bold 14px monospace';
+    ctx.font = 'bold 12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(goalP + '%', 64, 16);
+    ctx.fillText(ns.n25_overallScore.toFixed(0), 64, 14);
 
-    // Show action probability near ball
-    if (action) {
+    // Nearby + ball force
+    if (ns.n6_distBall < 20) {
       ctx.fillStyle = '#ffffff';
-      ctx.font = '11px monospace';
-      ctx.fillText('A:' + action, 64, 32);
+      ctx.font = '9px monospace';
+      ctx.fillText('B:' + ns.n7_ballForce.toFixed(0) + ' N:' + ns.n11_nearby, 64, 28);
     }
 
-    // Card probability
-    ctx.fillStyle = isRed ? '#ff6666' : '#ffaa00';
-    ctx.font = '10px monospace';
-    ctx.fillText('C:' + cardP, 64, 44);
+    // Severity + zone
+    ctx.fillStyle = '#888888';
+    ctx.font = '8px monospace';
+    ctx.fillText('S:' + ns.n18_foulSeverity + ' Q' + ns.n5_quadrant, 64, 40);
 
     sprite.userData.tex.needsUpdate = true;
   });
 
-  // Update per-player force labels
+  // Per-player numbers via NetSwitch AI routing
   for (let i = 0; i < 11; i++) {
     const hm = playerMeshes.home[i];
+    const hns = netswitchRoute('home', i, allPlayers, gameState.ballX, gameState.ballZ,
+                               refereeMesh.position.x, refereeMesh.position.z, gameState.tick);
     const hfl = playerForceLabels.home[i];
     const hc = hfl.userData.canvas;
     const hctx = hc.getContext('2d');
     hctx.clearRect(0, 0, 128, 48);
-    const hDist = Math.sqrt((hm.position.x - gameState.ballX) ** 2 + (hm.position.z - gameState.ballZ) ** 2);
-    const hForce = (gameState.force * 1e6 * Math.exp(-hDist / 30)).toFixed(1);
     hctx.fillStyle = '#6699ff';
-    hctx.font = 'bold 12px monospace';
+    hctx.font = 'bold 10px monospace';
     hctx.textAlign = 'center';
-    hctx.fillText('F:' + hForce, 64, 16);
+    hctx.fillText('G:' + hns.n1_goalProbL.toFixed(0) + ' B:' + hns.n7_ballForce.toFixed(0) + ' Z:' + hns.n4_zoneFrac.toFixed(0), 64, 14);
     hctx.fillStyle = '#aaccff';
-    hctx.font = '10px monospace';
-    hctx.fillText('d:' + hDist.toFixed(0) + 'm', 64, 32);
+    hctx.font = '9px monospace';
+    hctx.fillText('Ock:' + hns.n19_ockTima.toFixed(0) + ' Sw:' + hns.n15_switchFactor.toFixed(0) + ' Lp:' + hns.n8_laplaceA.toFixed(0), 64, 28);
     hfl.userData.tex.needsUpdate = true;
     hfl.position.set(hm.position.x, 2.2, hm.position.z);
 
     const am = playerMeshes.away[i];
+    const ans = netswitchRoute('away', i, allPlayers, gameState.ballX, gameState.ballZ,
+                               refereeMesh.position.x, refereeMesh.position.z, gameState.tick);
     const afl = playerForceLabels.away[i];
     const ac = afl.userData.canvas;
     const actx = ac.getContext('2d');
     actx.clearRect(0, 0, 128, 48);
-    const aDist = Math.sqrt((am.position.x - gameState.ballX) ** 2 + (am.position.z - gameState.ballZ) ** 2);
-    const aForce = (gameState.force * 1e6 * Math.exp(-aDist / 30)).toFixed(1);
     actx.fillStyle = '#ff9944';
-    actx.font = 'bold 12px monospace';
+    actx.font = 'bold 10px monospace';
     actx.textAlign = 'center';
-    actx.fillText('F:' + aForce, 64, 16);
+    actx.fillText('G:' + ans.n2_goalProbR.toFixed(0) + ' B:' + ans.n7_ballForce.toFixed(0) + ' Z:' + ans.n4_zoneFrac.toFixed(0), 64, 14);
     actx.fillStyle = '#ffcc88';
-    actx.font = '10px monospace';
-    actx.fillText('d:' + aDist.toFixed(0) + 'm', 64, 32);
+    actx.font = '9px monospace';
+    actx.fillText('Ock:' + ans.n19_ockTima.toFixed(0) + ' Sw:' + ans.n15_switchFactor.toFixed(0) + ' Lp:' + ans.n9_laplaceB.toFixed(0), 64, 28);
     afl.userData.tex.needsUpdate = true;
     afl.position.set(am.position.x, 2.2, am.position.z);
   }
