@@ -901,6 +901,27 @@ function simulateTick() {
     showEvent('FREE KICK');
   }
 
+  // Field boundary check: +2m = yellow, +5m = black card (showers)
+  for (let pi = 0; pi < 11; pi++) {
+    const hp = gameState.players.home[pi];
+    const ap = gameState.players.away[pi];
+    if (Math.abs(hp.tx) > 54.5 || Math.abs(hp.tz) > 36) {
+      if (Math.abs(hp.tx) > 57.5 || Math.abs(hp.tz) > 39) {
+        // Black card territory - showers hallway
+        hp.tx = Math.max(-52, Math.min(52, hp.tx));
+        hp.tz = Math.max(-33, Math.min(33, hp.tz));
+      }
+      hp.tx *= 0.95; hp.tz *= 0.95;
+    }
+    if (Math.abs(ap.tx) > 54.5 || Math.abs(ap.tz) > 36) {
+      if (Math.abs(ap.tx) > 57.5 || Math.abs(ap.tz) > 39) {
+        ap.tx = Math.max(-52, Math.min(52, ap.tx));
+        ap.tz = Math.max(-33, Math.min(33, ap.tz));
+      }
+      ap.tx *= 0.95; ap.tz *= 0.95;
+    }
+  }
+
   // Gaming pace: speed of play (meters per tick)
   gameState.gamePace = Math.sqrt(dx * dx + dz * dz);
 
@@ -1358,6 +1379,132 @@ for (let i = 0; i < 11; i++) {
   playerLabels.away.push(aLabel);
 }
 
+// ── Referee (black kit, runs on field following play) ──
+const refereeMesh = createPlayerFigure(0x111111, 0);
+refereeMesh.position.set(0, 0, 10);
+scene.add(refereeMesh);
+const refereeLabel = createNameLabel('REFEREE', 0x111111);
+refereeLabel.position.set(0, 2.5, 10);
+scene.add(refereeLabel);
+let refereeTarget = { tx: 0, tz: 10 };
+
+// ── Goalie distance zones (visible circles on field) ──
+const goalieZoneGroup = new THREE.Group();
+scene.add(goalieZoneGroup);
+
+function createZoneCircle(radius, color, x) {
+  const pts = [];
+  for (let a = 0; a <= 64; a++) {
+    const angle = (a / 64) * Math.PI * 2;
+    pts.push(new THREE.Vector3(x + Math.cos(angle) * radius, 0.06, Math.sin(angle) * radius));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.4 });
+  return new THREE.Line(geo, mat);
+}
+
+// Home goalie zones: 5m (red), 15m, 25m, 45m from goal
+[-52.5, 52.5].forEach(goalX => {
+  goalieZoneGroup.add(createZoneCircle(5, 0xff2222, goalX));   // red zone
+  goalieZoneGroup.add(createZoneCircle(15, 0xffaa00, goalX));  // yellow zone
+  goalieZoneGroup.add(createZoneCircle(25, 0xffff00, goalX));  // caution zone
+  goalieZoneGroup.add(createZoneCircle(45, 0x44ff44, goalX));  // goalie max range
+});
+
+// ── Field boundary lines (+2m allowed, +5m black card) ──
+const boundaryGroup = new THREE.Group();
+scene.add(boundaryGroup);
+
+// +2m off-field limit (yellow dashed)
+const limit2pts = [
+  new THREE.Vector3(-54.5, 0.05, -36), new THREE.Vector3(54.5, 0.05, -36),
+  new THREE.Vector3(54.5, 0.05, 36), new THREE.Vector3(-54.5, 0.05, 36),
+  new THREE.Vector3(-54.5, 0.05, -36)
+];
+const limit2geo = new THREE.BufferGeometry().setFromPoints(limit2pts);
+boundaryGroup.add(new THREE.Line(limit2geo, new THREE.LineBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.3 })));
+
+// +5m black card / showers hallway (red)
+const limit5pts = [
+  new THREE.Vector3(-57.5, 0.05, -39), new THREE.Vector3(57.5, 0.05, -39),
+  new THREE.Vector3(57.5, 0.05, 39), new THREE.Vector3(-57.5, 0.05, 39),
+  new THREE.Vector3(-57.5, 0.05, -39)
+];
+const limit5geo = new THREE.BufferGeometry().setFromPoints(limit5pts);
+boundaryGroup.add(new THREE.Line(limit5geo, new THREE.LineBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.25 })));
+
+// ── Per-player card risk labels (distance to goalie = card risk) ──
+const cardRiskLabels = { home: [], away: [] };
+for (let i = 0; i < 11; i++) {
+  const hcr = makeLiveLabel();
+  hcr.scale.set(2.5, 0.6, 1);
+  scene.add(hcr);
+  cardRiskLabels.home.push(hcr);
+  const acr = makeLiveLabel();
+  acr.scale.set(2.5, 0.6, 1);
+  scene.add(acr);
+  cardRiskLabels.away.push(acr);
+}
+
+// Update referee position (follows ball, stays offset)
+function updateReferee() {
+  const offset = footballHash(gameState.tick * 0.7, 3) * 15 - 7;
+  refereeTarget.tx = gameState.ballX * 0.7 + offset;
+  refereeTarget.tz = gameState.ballZ * 0.5 + 8 + (footballHash(gameState.tick * 1.1, 3) - 0.4) * 10;
+  refereeTarget.tx = Math.max(-50, Math.min(50, refereeTarget.tx));
+  refereeTarget.tz = Math.max(-32, Math.min(32, refereeTarget.tz));
+
+  refereeMesh.position.x += (refereeTarget.tx - refereeMesh.position.x) * 0.06;
+  refereeMesh.position.z += (refereeTarget.tz - refereeMesh.position.z) * 0.06;
+  const rdx = refereeTarget.tx - refereeMesh.position.x;
+  const rdz = refereeTarget.tz - refereeMesh.position.z;
+  if (Math.abs(rdx) + Math.abs(rdz) > 0.3) {
+    refereeMesh.rotation.y = Math.atan2(rdx, rdz);
+    if (refereeMesh.userData.lLeg) {
+      refereeMesh.userData.lLeg.rotation.x = Math.sin(Date.now() * 0.006) * 0.3;
+      refereeMesh.userData.rLeg.rotation.x = -Math.sin(Date.now() * 0.006) * 0.3;
+    }
+  }
+  refereeLabel.position.set(refereeMesh.position.x, 2.5, refereeMesh.position.z);
+}
+
+// Update card risk per player (exponent of distance to nearest goalie)
+function updateCardRisks() {
+  for (let i = 0; i < 11; i++) {
+    // Home players - risk near AWAY goal (x=52.5)
+    const hm = playerMeshes.home[i];
+    const hDistGoal = Math.sqrt((hm.position.x - 52.5) ** 2 + hm.position.z ** 2);
+    const hRisk = Math.exp(-hDistGoal / 15.0);
+    const hCardType = hDistGoal < 5 ? 'R' : hDistGoal < 25 ? 'Y' : '-';
+    const hcr = cardRiskLabels.home[i];
+    const hc = hcr.userData.canvas;
+    const hctx = hc.getContext('2d');
+    hctx.clearRect(0, 0, 128, 48);
+    hctx.fillStyle = hCardType === 'R' ? '#ff3333' : hCardType === 'Y' ? '#ffcc00' : '#44ff44';
+    hctx.font = 'bold 11px monospace';
+    hctx.textAlign = 'center';
+    hctx.fillText(hCardType + ':' + (hRisk * 100).toFixed(0) + '% d:' + hDistGoal.toFixed(0), 64, 16);
+    hcr.userData.tex.needsUpdate = true;
+    hcr.position.set(hm.position.x, 1.6, hm.position.z);
+
+    // Away players - risk near HOME goal (x=-52.5)
+    const am = playerMeshes.away[i];
+    const aDistGoal = Math.sqrt((am.position.x + 52.5) ** 2 + am.position.z ** 2);
+    const aRisk = Math.exp(-aDistGoal / 15.0);
+    const aCardType = aDistGoal < 5 ? 'R' : aDistGoal < 25 ? 'Y' : '-';
+    const acr = cardRiskLabels.away[i];
+    const ac = acr.userData.canvas;
+    const actx = ac.getContext('2d');
+    actx.clearRect(0, 0, 128, 48);
+    actx.fillStyle = aCardType === 'R' ? '#ff3333' : aCardType === 'Y' ? '#ffcc00' : '#44ff44';
+    actx.font = 'bold 11px monospace';
+    actx.textAlign = 'center';
+    actx.fillText(aCardType + ':' + (aRisk * 100).toFixed(0) + '% d:' + aDistGoal.toFixed(0), 64, 16);
+    acr.userData.tex.needsUpdate = true;
+    acr.position.set(am.position.x, 1.6, am.position.z);
+  }
+}
+
 // ── UI setup ──
 
 // Camera buttons
@@ -1518,6 +1665,12 @@ function animate(time) {
 
   // Update live probability numbers on field
   updateLiveOdds();
+
+  // Referee follows play
+  updateReferee();
+
+  // Card risk per player (distance to goalie exponent)
+  updateCardRisks();
 
   // Crowd wave animation (subtle swaying)
   for (let s = 0; s < spectatorMeshes.length; s += 4) {
