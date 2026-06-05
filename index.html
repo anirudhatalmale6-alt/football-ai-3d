@@ -601,7 +601,7 @@ let gameState = {
   redCards: 0
 };
 
-// ── Force vector engine (port from C++) ──
+// ── Force vector engine (all math from recordings) ──
 function footballHash(x, depth) {
   let val = x;
   for (let i = 0; i < depth; i++) {
@@ -609,6 +609,77 @@ function footballHash(x, depth) {
     val = Math.abs(val) * 0.3 + 0.25;
   }
   return val;
+}
+
+// Trig chain: cos->cos->cos->sin->sin->tan->tan->tan
+function trigChain(ballLoc, sigmaLoc, softmaxLoc) {
+  let v = Math.cos(Math.cos(Math.cos(ballLoc)));
+  v = Math.sin(Math.sin(v * sigmaLoc));
+  v = Math.tan(Math.max(-1.5, Math.min(1.5, v * softmaxLoc))) * 0.1;
+  return v;
+}
+
+// Laplace zone probability
+function laplaceZone(position, first) {
+  if (first) return (300 - 210 * position + 5) * (2/3) * 0.001;
+  return (300 - 220 * position + 4.9998) * (1/3) * 0.001;
+}
+
+// Ock-Tima goal scoring model
+function ockTima(fieldPct, goalsScored) {
+  const ock = Math.sin(fieldPct * Math.PI) * Math.sin(7.0 * fieldPct);
+  const tima = 49 * Math.sin(fieldPct) * Math.sin(fieldPct) * Math.cos(7.0 * fieldPct);
+  let base = (ock + tima) / 75.0;
+  if (goalsScored > 1) base *= Math.pow(7, goalsScored) / 1155.0;
+  return Math.abs(base);
+}
+
+// Pole hit probability
+function poleHitProb(angle, isLeft) {
+  const a = angle * Math.PI / 180;
+  let p = 0.6 * Math.sin(a) * Math.cos(a) * Math.pow(Math.sin(a), 3);
+  p /= (1.1 * 7.7 * 7.1 * 3.31);
+  if (!isLeft) p *= (1/8) / (1/7);
+  return Math.abs(p);
+}
+
+// Surface friction modifier
+function surfaceModifier(surfaceType) {
+  const frictions = [0.0000009999777, 0.000001234, 0.0000005, 0.0000008];
+  return 1.0 + (frictions[surfaceType] || frictions[0]) * 1e6;
+}
+
+// Quadrant probability
+function quadrantProb(quadrant, bx, bz) {
+  const qx = [-.5, -.5, .5, .5][quadrant];
+  const qz = [-.5, .5, .5, -.5][quadrant];
+  const d = Math.sqrt((bx - qx) ** 2 + (bz - qz) ** 2);
+  return Math.exp(-d * 1.5) * 0.6;
+}
+
+// Zone attack signal
+function zoneSignal(x, y, isCenter) {
+  if (isCenter) return 0.6 * Math.sin(x * Math.PI) * Math.cos(y * Math.PI);
+  return x > 0.5 ? 1.4 * Math.sin(x * Math.PI) : 0.6 * Math.cos(y * Math.PI);
+}
+
+// Player switch sigmoid
+function playerSwitchFactor(posHeight) {
+  const base = posHeight < 0.3 ? 1.0 : posHeight > 0.7 ? 1.111 : 1.117;
+  const sigmoid = 1.0 / (1.0 + Math.exp(-6.0 * (posHeight - 0.5)));
+  return Math.exp(sigmoid * base * 1.1111777) / (Math.exp(sigmoid * base * 1.1111777) + Math.exp(1.0));
+}
+
+// Augustin performance ratio
+function augustinCalc(ramGb, cpuCores, freqGhz) {
+  const ramSigma = ramGb * Math.exp(-(freqGhz * cpuCores) / 14.031);
+  const cpuMapped = cpuCores * freqGhz * (1.0 - Math.exp(-ramGb / 16.0));
+  return cpuMapped / (cpuMapped + ramSigma);
+}
+
+// Terracotta thermal efficiency
+function terracottaCalc(dataSizeMb, cpuTemp, passes) {
+  return 0.08 * passes * (1.0 - Math.exp(-dataSizeMb / 100.0));
 }
 
 function calculateForce(moveId, behind, front) {
@@ -706,14 +777,44 @@ function simulateTick() {
   const forceDirMult = (dirHash > 0.45) ? 0.7 : (dirHash > 0.25) ? 0.4998 : 0.3;
   gameState.forceDir = (dirHash > 0.45) ? 'UP' : (dirHash > 0.25) ? 'TRAVELER' : 'DOWN';
 
-  // Movement bias
+  // Movement bias with all math from recordings
   const { xBias, zBias } = getMovementBias(moveId);
   const direction = (gameState.possession === 0) ? 1.0 : -1.0;
-  const step = footballHash(t * 3.3 + m * 7.0, 4) * 3.5 * forceDirMult;
+
+  // Trig chain modifies step intensity
+  const bxNorm2 = (gameState.ballX + 52.5) / 105.0;
+  const bzNorm2 = (gameState.ballZ + 34) / 68.0;
+  const trigMod = 1.0 + trigChain(bxNorm2, bzNorm2, 0.5);
+
+  // Laplace zone affects movement near goals
+  const laplaceMod = 1.0 + laplaceZone(bxNorm2, bxNorm2 < 0.5) * 2.0;
+
+  // Zone attack signal
+  const zoneMod = Math.abs(zoneSignal(bxNorm2, bzNorm2, Math.abs(bxNorm2 - 0.5) < 0.15));
+
+  // Quadrant influence
+  const quad = bxNorm2 < 0.5 ? (bzNorm2 < 0.5 ? 0 : 1) : (bzNorm2 > 0.5 ? 2 : 3);
+  const quadMod = 1.0 + quadrantProb(quad, bxNorm2 - 0.5, bzNorm2 - 0.5);
+
+  // Player switch factor for possession changes
+  const switchMod = playerSwitchFactor(bxNorm2);
+
+  // Surface modifier (default natural grass)
+  const surfMod = surfaceModifier(0);
+
+  // Combined step with all math
+  const baseStep = footballHash(t * 3.3 + m * 7.0, 4) * 2.0 * forceDirMult;
+  const step = baseStep * trigMod * laplaceMod * (0.5 + zoneMod) * quadMod * switchMod;
 
   const prevX = gameState.ballX, prevZ = gameState.ballZ;
   gameState.ballX += xBias * step * direction;
-  gameState.ballZ += zBias * step;
+  gameState.ballZ += zBias * step * (0.8 + footballHash(t * 1.7, 3) * 0.4);
+
+  // Ock-Tima goal scoring influence near goals
+  const ockInfluence = ockTima(bxNorm2, gameState.homeGoals + gameState.awayGoals);
+  if (Math.abs(gameState.ballX) > 40) {
+    gameState.ballX += (gameState.ballX > 0 ? 1 : -1) * ockInfluence * 3.0;
+  }
 
   // Clamp
   gameState.ballX = Math.max(-52.5, Math.min(52.5, gameState.ballX));
@@ -735,28 +836,69 @@ function simulateTick() {
     gameState.ballY = 0.4;
   }
 
-  // Goal check
-  if (gameState.ballX > 50 && moveId >= 19 && moveId <= 24) {
+  // Goal check with pole/crossbar physics
+  const isShot = moveId >= 19 && moveId <= 24;
+  const isNearGoalR = gameState.ballX > 45;
+  const isNearGoalL = gameState.ballX < -45;
+
+  if ((isNearGoalR || isNearGoalL) && isShot) {
     const goalChance = footballHash(t * 5.0 + m * 20.0, 7);
-    if (goalChance > 0.40 && Math.abs(gameState.ballZ) < 7.32) {
-      if (gameState.possession === 0) gameState.homeGoals++;
-      else gameState.awayGoals++;
-      showEvent('GOAL!');
-      gameState.ballX = 0; gameState.ballZ = 0;
-    }
-  } else if (gameState.ballX < -50 && moveId >= 19 && moveId <= 24) {
-    const goalChance = footballHash(t * 5.0 + m * 20.0 + 100, 7);
-    if (goalChance > 0.40 && Math.abs(gameState.ballZ) < 7.32) {
-      if (gameState.possession === 1) gameState.awayGoals++;
-      else gameState.homeGoals++;
-      showEvent('GOAL!');
-      gameState.ballX = 0; gameState.ballZ = 0;
+    const shotAngle = Math.atan2(Math.abs(gameState.ballZ), isNearGoalR ? 52.5 - gameState.ballX : gameState.ballX + 52.5) * 180 / Math.PI;
+    const poleProb = poleHitProb(shotAngle, gameState.ballZ < 0);
+    const ockGoal = ockTima(bxNorm2, gameState.homeGoals + gameState.awayGoals);
+
+    if (Math.abs(gameState.ballZ) < 7.32) {
+      if (goalChance > 0.35 - ockGoal * 0.5) {
+        if (isNearGoalR) {
+          if (gameState.possession === 0) gameState.homeGoals++; else gameState.awayGoals++;
+        } else {
+          if (gameState.possession === 1) gameState.awayGoals++; else gameState.homeGoals++;
+        }
+        showEvent('GOAL!');
+        gameState.ballX = 0; gameState.ballZ = 0;
+      } else if (goalChance > 0.30 && poleProb > 0.001) {
+        showEvent(gameState.ballZ < 0 ? 'LEFT POST!' : 'RIGHT POST!');
+        gameState.ballX *= 0.8;
+        gameState.ballZ *= -0.6;
+      } else if (goalChance > 0.28) {
+        showEvent('CROSSBAR!');
+        gameState.ballY = 3.0;
+        gameState.ballX *= 0.7;
+      }
+    } else if (Math.abs(gameState.ballZ) < 15) {
+      // Wide shot
+      if (goalChance > 0.65) showEvent('WIDE!');
     }
   }
 
-  // Sideline pull
-  if (Math.abs(gameState.ballZ) > 30) {
-    gameState.ballZ *= 0.9;
+  // Corner kicks when ball goes past goal line
+  if (Math.abs(gameState.ballX) > 52 && !isShot) {
+    const cornerSide = gameState.ballZ > 0 ? 'RIGHT' : 'LEFT';
+    showEvent(cornerSide + ' CORNER');
+    gameState.ballX = (gameState.ballX > 0 ? 50 : -50);
+    gameState.ballZ = gameState.ballZ > 0 ? 32 : -32;
+  }
+
+  // Sideline: throw-in when ball goes out
+  if (Math.abs(gameState.ballZ) > 33) {
+    showEvent('THROW IN');
+    gameState.ballZ = gameState.ballZ > 0 ? 32 : -32;
+    gameState.possession = 1 - gameState.possession;
+  } else if (Math.abs(gameState.ballZ) > 30) {
+    gameState.ballZ *= 0.95;
+  }
+
+  // Offside check (attacker past last defender)
+  const offsideRoll = footballHash(t * 9.1 + m * 3.3, 4);
+  if (isShot && Math.abs(gameState.ballX) > 35 && offsideRoll < 0.04) {
+    showEvent('OFFSIDE');
+    gameState.ballX *= 0.6;
+    gameState.possession = 1 - gameState.possession;
+  }
+
+  // Free kick on fouls
+  if (moveId === 33 && footballHash(t * 4.4 + m * 2.2, 4) < 0.08) {
+    showEvent('FREE KICK');
   }
 
   // Gaming pace: speed of play (meters per tick)
@@ -1560,20 +1702,23 @@ function updateLiveOdds() {
     afl.position.set(am.position.x, 2.2, am.position.z);
   }
 
-  // Gaming pace display
+  // Gaming pace display with all formula outputs
   const pc = paceSprite.userData.canvas;
   const pctx = pc.getContext('2d');
   pctx.clearRect(0, 0, 128, 48);
   pctx.fillStyle = '#00ffaa';
-  pctx.font = 'bold 13px monospace';
+  pctx.font = 'bold 11px monospace';
   pctx.textAlign = 'center';
   const pace = (gameState.gamePace * 60).toFixed(1);
   const gp = (gameState.goalProbHere * 100).toFixed(0);
   const cp = (gameState.cardProbHere * 100).toFixed(0);
-  pctx.fillText('PACE:' + pace + ' GOAL:' + gp + '% CARD:' + cp + '% YC:' + gameState.yellowCards + ' RC:' + gameState.redCards, 64, 20);
+  const bxN = (gameState.ballX + 52.5) / 105;
+  const ock = (ockTima(bxN, gameState.homeGoals + gameState.awayGoals) * 100).toFixed(1);
+  const aug = augustinCalc(64, 16, 3.5).toFixed(3);
+  pctx.fillText('PACE:' + pace + ' G:' + gp + '% C:' + cp + '% Ock:' + ock + ' Aug:' + aug, 64, 16);
   pctx.fillStyle = '#88ffcc';
-  pctx.font = '10px monospace';
-  pctx.fillText('Move:#' + gameState.moveId + ' ' + gameState.forceDir + ' F:' + (gameState.force * 1e9).toFixed(2), 64, 38);
+  pctx.font = '9px monospace';
+  pctx.fillText('#' + gameState.moveId + ' ' + gameState.forceDir + ' YC:' + gameState.yellowCards + ' RC:' + gameState.redCards + ' Lp:' + laplaceZone(bxN, true).toFixed(2), 64, 34);
   paceSprite.userData.tex.needsUpdate = true;
 }
 
