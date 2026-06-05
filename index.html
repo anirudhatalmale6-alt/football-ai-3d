@@ -1369,56 +1369,126 @@ function animate(time) {
 
 requestAnimationFrame(animate);
 
-// ── Dev View (Shift+2) - shows all numbers on field ──
+// ── Dev View (Shift+2) - odds at every spot on field ──
 let devViewActive = false;
-const devOverlay = document.createElement('div');
-devOverlay.id = 'devOverlay';
-devOverlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:50;pointer-events:none;display:none;font-family:monospace;font-size:11px;color:#00ff88;';
+const devGroup = new THREE.Group();
+devGroup.visible = false;
+scene.add(devGroup);
 
-function createDevView() {
-  devOverlay.innerHTML = '';
-  const zones = [
-    {x:'10%',y:'20%',text:'RED ZONE\\n5m depth\\nlog(severity)=180\\nban x3'},
-    {x:'85%',y:'20%',text:'RED ZONE\\n5m depth\\nlog(severity)=180\\nban x3'},
-    {x:'10%',y:'40%',text:'YELLOW\\n25m out\\nseverity=145\\nban x2'},
-    {x:'85%',y:'40%',text:'YELLOW\\n25m out\\nseverity=145\\nban x2'},
-    {x:'48%',y:'15%',text:'GOALIE VIEW\\n8m x 60m x 80m x 40m'},
-    {x:'48%',y:'50%',text:'CENTER\\nLaplace A: 300,210,5,2/3\\nLaplace B: 300,220,4.9998,1/3\\nOverlap: 35%'},
-    {x:'25%',y:'35%',text:'Q1 LEFT-BTM\\nP=exp(-d*1.5)*0.6\\nCorner: 1/7'},
-    {x:'25%',y:'65%',text:'Q2 LEFT-UP\\nZone: 3/5 left\\nBack: 3/5'},
-    {x:'70%',y:'35%',text:'Q3 RIGHT-UP\\nZone: 7/5 right\\nCorner: 1/8'},
-    {x:'70%',y:'65%',text:'Q4 RIGHT-BTM\\nSignal: 3,3,3\\nConv: 5.5/6.6757'},
-    {x:'48%',y:'80%',text:'BALL\\n18 placements (9B+9W)\\nSize: 9 official\\nVolatility: ns sampling'},
-    {x:'5%',y:'85%',text:'CARD RULINGS\\nYellow: 2-shoulders, kick, cloth, ring-a-ling\\nRed: push-down, foul, hassle\\nBlack: 1:30000 odds'},
-    {x:'48%',y:'8%',text:'AUGUSTIN\\nratio=0.9789\\nK=14.031 target=0.97894'},
-    {x:'75%',y:'8%',text:'TERRACOTTA\\nkiln=1050C shrink=8%\\ndensity=1.8 glaze=95%'},
-    {x:'5%',y:'8%',text:'RADAR\\n2,4,3,4,7,4,16,20,23\\nsum=83'},
-    {x:'30%',y:'50%',text:'SURFACE\\nNatural: 0.0000010\\nPlastic: 0.0000012\\nTable: 0.0000005'},
-    {x:'65%',y:'50%',text:'FORCE\\nF=0.0023*0.0007*0.03^1.001\\n44 movements\\nTrig: cos>sin>tan'},
-    {x:'48%',y:'92%',text:'BETS: 70,000/sec | FREE: 45% | TAKEN: 90% | TCP: 3.99'},
-  ];
+// Surface type label
+const surfaceNames = ['Natural Grass South Africa','Plastix Tex-Tex Glassi Glasgow','Semi-Grass Edinburgh','Table Indoor','Blank Key'];
+let currentSurface = 0;
 
-  zones.forEach(z => {
-    const el = document.createElement('div');
-    el.style.cssText = `position:absolute;left:${z.x};top:${z.y};background:rgba(0,20,0,0.85);border:1px solid #00ff44;padding:4px 6px;border-radius:3px;white-space:pre;line-height:1.3;font-size:10px;`;
-    el.textContent = z.text.replace(/\\n/g, '\\n');
-    el.innerHTML = z.text.split('\\n').join('<br>');
-    devOverlay.appendChild(el);
-  });
-
-  const title = document.createElement('div');
-  title.style.cssText = 'position:absolute;right:10px;bottom:10px;background:rgba(0,255,68,0.15);border:1px solid #00ff44;padding:6px 12px;border-radius:4px;font-size:13px;font-weight:bold;color:#00ff88;';
-  title.textContent = 'DEV VIEW [Shift+2]  |  NetSwitch v2.2.0  |  893 tests  |  107 football checks';
-  devOverlay.appendChild(title);
+// Probability at each field position
+function fieldOdds(fx, fz) {
+  const distGoalL = Math.sqrt((fx + 52.5) * (fx + 52.5) + fz * fz);
+  const distGoalR = Math.sqrt((fx - 52.5) * (fx - 52.5) + fz * fz);
+  const distMin = Math.min(distGoalL, distGoalR);
+  const goalProb = Math.exp(-distMin / 25.0) * 0.6;
+  const cardProb = (distMin < 5) ? 0.85 : (distMin < 25) ? 0.35 : 0.05;
+  const zone = (Math.abs(fx) < 20) ? 0.6 : (fx > 0 ? 1.4 : 0.6);
+  const laplace = (300 - 210 * Math.abs(fx / 52.5) + 5) * (2/3) * 0.001;
+  const total = goalProb * zone * (1 + laplace);
+  return { goal: goalProb, card: cardProb, zone: zone, total: total };
 }
 
-document.body.appendChild(devOverlay);
-createDevView();
+function makeOddsLabel(text, color) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 32;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, 64, 22);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.9 });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(4, 1, 1);
+  return sprite;
+}
 
+// Grid of odds numbers across the pitch
+function buildDevView() {
+  while (devGroup.children.length > 0) devGroup.remove(devGroup.children[0]);
+
+  // Odds numbers at every 10m grid
+  for (let gx = -50; gx <= 50; gx += 8) {
+    for (let gz = -30; gz <= 30; gz += 8) {
+      const odds = fieldOdds(gx, gz);
+      const val = (odds.total * 100).toFixed(1);
+      const color = odds.card > 0.5 ? '#ff4444' : odds.card > 0.2 ? '#ffcc00' : '#00ff88';
+      const label = makeOddsLabel(val, color);
+      label.position.set(gx, 0.3, gz);
+      devGroup.add(label);
+    }
+  }
+
+  // Card zone labels at key spots
+  const keyLabels = [
+    { x: -48, z: 0, text: 'RED x3', col: '#ff2222' },
+    { x: 48, z: 0, text: 'RED x3', col: '#ff2222' },
+    { x: -35, z: 0, text: 'YEL x2', col: '#ffcc00' },
+    { x: 35, z: 0, text: 'YEL x2', col: '#ffcc00' },
+    { x: 0, z: 0, text: 'CENTER 35%', col: '#00ff88' },
+    { x: -25, z: -20, text: 'Q1 1/7', col: '#44aaff' },
+    { x: -25, z: 20, text: 'Q2 3/5', col: '#44aaff' },
+    { x: 25, z: 20, text: 'Q3 7/5', col: '#44aaff' },
+    { x: 25, z: -20, text: 'Q4 3/5', col: '#44aaff' },
+    { x: 0, z: -28, text: 'Laplace A: 300,210,5', col: '#88ffaa' },
+    { x: 0, z: 28, text: 'Laplace B: 300,220,5', col: '#88ffaa' },
+  ];
+  keyLabels.forEach(kl => {
+    const s = makeOddsLabel(kl.text, kl.col);
+    s.position.set(kl.x, 1.5, kl.z);
+    s.scale.set(6, 1.2, 1);
+    devGroup.add(s);
+  });
+
+  // Trajectory lines (red = high card risk paths, yellow = movement paths)
+  const redLineMat = new THREE.LineBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.6 });
+  const yellowLineMat = new THREE.LineBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.5 });
+
+  for (let t = 0; t < 12; t++) {
+    const pts = [];
+    const isRed = t < 5;
+    let px = -50 + t * 8, pz = -25 + (t % 3) * 15;
+    for (let s = 0; s < 20; s++) {
+      const h = footballHash(t * 13.7 + s * 3.3, 3);
+      px += (h - 0.3) * 8;
+      pz += (h - 0.5) * 6;
+      px = Math.max(-52, Math.min(52, px));
+      pz = Math.max(-33, Math.min(33, pz));
+      pts.push(new THREE.Vector3(px, 0.15 + Math.sin(s * 0.5) * 0.3, pz));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    devGroup.add(new THREE.Line(geo, isRed ? redLineMat : yellowLineMat));
+  }
+
+  // Surface type label
+  const surfLabel = makeOddsLabel(surfaceNames[currentSurface], '#00ffaa');
+  surfLabel.position.set(0, 3, -32);
+  surfLabel.scale.set(12, 2, 1);
+  surfLabel.name = 'surfaceLabel';
+  devGroup.add(surfLabel);
+
+  // Footer bar
+  const footer = makeOddsLabel('SHIFT+2 DEV | 893 tests | Augustin 0.9789 | Terracotta 1050C | 70K bets/s | TCP 3.99', '#00ff88');
+  footer.position.set(0, 0.5, 35);
+  footer.scale.set(30, 1.5, 1);
+  devGroup.add(footer);
+}
+
+buildDevView();
+
+// Cycle surface type with Shift+3
 window.addEventListener('keydown', (e) => {
-  if (e.shiftKey && e.key === '@' || e.shiftKey && e.key === '2') {
+  if (e.shiftKey && (e.key === '@' || e.key === '2')) {
     devViewActive = !devViewActive;
-    devOverlay.style.display = devViewActive ? 'block' : 'none';
+    devGroup.visible = devViewActive;
+  }
+  if (e.shiftKey && (e.key === '#' || e.key === '3') && devViewActive) {
+    currentSurface = (currentSurface + 1) % surfaceNames.length;
+    buildDevView();
   }
 });
 
