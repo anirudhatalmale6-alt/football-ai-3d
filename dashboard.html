@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI3Football — Game Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
+:root { --bg: #0a0f0a; --panel: #0d1a0d; --border: #1a3a1a; --green: #00e676; --red: #ff1744; --yellow: #ffd740; --blue: #2979ff; --orange: #ff6d00; --white: #e0e8e0; --dim: #667766; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--white); font-family: 'Share Tech Mono', monospace; font-size: 11px; overflow: hidden; height: 100vh; }
+
+.header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: linear-gradient(180deg, #0a1a0a, #050f05); border-bottom: 1px solid var(--border); }
+.header .logo { font-family: 'Orbitron', sans-serif; font-size: 14px; color: var(--green); }
+.header .match-info { display: flex; gap: 12px; align-items: center; }
+.header .team { padding: 3px 10px; font-weight: bold; font-size: 12px; }
+.header .home { background: var(--blue); color: #fff; }
+.header .away { background: var(--orange); color: #fff; }
+.header .score { font-size: 16px; font-family: 'Orbitron'; color: var(--green); }
+.header .time { font-size: 14px; color: var(--yellow); }
+.header .half { font-size: 10px; color: var(--dim); }
+
+.tabs { display: flex; border-bottom: 1px solid var(--border); }
+.tab { padding: 6px 16px; cursor: pointer; color: var(--dim); border-bottom: 2px solid transparent; }
+.tab.active { color: var(--green); border-bottom-color: var(--green); }
+.tab:hover { color: var(--white); }
+
+.views { flex: 1; overflow: hidden; position: relative; height: calc(100vh - 70px); }
+.view { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; overflow: auto; }
+.view.active { display: block; }
+
+/* VIEW 1: Data Table */
+#tableView { padding: 8px; }
+#tableView table { width: 100%; border-collapse: collapse; font-size: 10px; }
+#tableView th { background: #0d1a0d; color: var(--green); padding: 4px 6px; text-align: left; border: 1px solid var(--border); position: sticky; top: 0; z-index: 2; }
+#tableView td { padding: 3px 5px; border: 1px solid #0a1a0a; font-size: 10px; }
+.tl-red { background: rgba(255,23,68,0.25); color: #ff4466; }
+.tl-yellow { background: rgba(255,215,64,0.2); color: #ffdd44; }
+.tl-green { background: rgba(0,230,118,0.15); color: #44ff88; }
+.tl-blue { background: rgba(41,121,255,0.2); color: #66aaff; }
+.tl-purple { background: rgba(156,39,176,0.2); color: #cc66ff; }
+.tl-orange { background: rgba(255,109,0,0.2); color: #ff9944; }
+
+/* VIEW 2: 2D Field */
+#fieldView { background: #0a120a; }
+#field2d { width: 100%; height: 100%; }
+
+/* STATUS BAR */
+.statusbar { position: fixed; bottom: 0; left: 0; right: 0; padding: 4px 12px; background: #050a05; border-top: 1px solid var(--border); font-size: 10px; color: var(--dim); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">AI3FOOTBALL DASHBOARD</div>
+  <div class="match-info">
+    <span class="team home" id="dHomeName">HOME</span>
+    <span class="score" id="dScore">0 - 0</span>
+    <span class="team away" id="dAwayName">AWAY</span>
+    <span class="time" id="dTime">45:00</span>
+    <span class="half" id="dHalf">1ST</span>
+  </div>
+  <div style="color:var(--dim)">NetSwitch v2.2.0 | <span id="dPlatform">-</span> <span id="dPerf">-</span>%</div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchView('table')">VIEW 1: DATA TABLE</div>
+  <div class="tab" onclick="switchView('field')">VIEW 2: 2D FIELD MAP</div>
+</div>
+
+<div class="views">
+  <div class="view active" id="tableView">
+    <table id="dataTable"><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+  </div>
+  <div class="view" id="fieldView">
+    <canvas id="field2d"></canvas>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span id="statusLeft">TICK: 0 | PACE: 0</span>
+  <span id="statusRight">YC: 0 | RC: 0 | EVENTS: 0</span>
+</div>
+
+<script>
+// ── Game Engine (same as 3D stadium) ──
+function footballHash(x, depth) {
+  let val = x;
+  for (let i = 0; i < depth; i++) {
+    val = Math.sin(val * 1.5 + i * 0.7 + x * 0.01) * Math.cos(val * 0.618);
+    val = Math.abs(val) * 0.3 + 0.25;
+  }
+  return val;
+}
+
+function laplaceZone(pos, first) {
+  return first ? (300 - 210 * pos + 5) * (2/3) * 0.001 : (300 - 220 * pos + 4.9998) * (1/3) * 0.001;
+}
+function ockTima(pct, goals) {
+  const ock = Math.sin(pct * Math.PI) * Math.sin(7 * pct);
+  const tima = 49 * Math.sin(pct) * Math.sin(pct) * Math.cos(7 * pct);
+  let b = (ock + tima) / 75;
+  if (goals > 1) b *= Math.pow(7, goals) / 1155;
+  return Math.abs(b);
+}
+function zoneSignal(x, y, c) {
+  return c ? 0.6 * Math.sin(x * Math.PI) * Math.cos(y * Math.PI) : x > 0.5 ? 1.4 * Math.sin(x * Math.PI) : 0.6 * Math.cos(y * Math.PI);
+}
+function playerSwitchFactor(h) {
+  const b = h < 0.3 ? 1 : h > 0.7 ? 1.111 : 1.117;
+  const s = 1 / (1 + Math.exp(-6 * (h - 0.5)));
+  return Math.exp(s * b * 1.1111777) / (Math.exp(s * b * 1.1111777) + Math.exp(1));
+}
+
+const COLUMNS = ['ID','Player','Team','X','Z','GoalProb%','CardRisk%','Zone','Quadrant','DistBall','BallForce','Laplace','OckTima','Nearby','CrowdRisk','DistRef','FoulSev','SwitchFactor','Territory','Violations','Commotion','OpponentGambler','TrafficLight','StayInGame%','SampleCol'];
+
+const PLAYERS_H = ['SALAH','FIRMINO','MANE','HENDERSON','VAN DIJK','ALEXANDER-ARNOLD','ROBERTSON','FABINHO','ALISSON','THIAGO','DIAZ'];
+const PLAYERS_A = ['HAALAND','DE BRUYNE','FODEN','RODRI','DIAS','WALKER','GREALISH','BERNARDO','EDERSON','GUNDOGAN','ALVAREZ'];
+
+const homeForm = [{x:-48,z:0},{x:-35,z:-22},{x:-35,z:-8},{x:-35,z:8},{x:-35,z:22},{x:-20,z:-24},{x:-20,z:-8},{x:-20,z:8},{x:-20,z:24},{x:-8,z:-10},{x:-8,z:10}];
+const awayForm = [{x:48,z:0},{x:35,z:22},{x:35,z:8},{x:35,z:-8},{x:35,z:-22},{x:20,z:24},{x:20,z:8},{x:20,z:-8},{x:20,z:-24},{x:8,z:10},{x:8,z:-10}];
+
+let gs = {
+  tick: 0, running: false, gameMinute: 0, countdown: 45,
+  ballX: 0, ballZ: 0, homeGoals: 0, awayGoals: 0,
+  possession: 0, moveId: 0, force: 0, gamePace: 0,
+  yellowCards: 0, redCards: 0, events: 0, halfTime: false,
+  homeName: 'HOME', awayName: 'AWAY',
+  players: []
+};
+
+// Init players
+for (let i = 0; i < 11; i++) {
+  gs.players.push({ name: PLAYERS_H[i], team: 'H', x: homeForm[i].x, z: homeForm[i].z, tx: homeForm[i].x, tz: homeForm[i].z });
+  gs.players.push({ name: PLAYERS_A[i], team: 'A', x: awayForm[i].x, z: awayForm[i].z, tx: awayForm[i].x, tz: awayForm[i].z });
+}
+// Referee
+gs.players.push({ name: 'REFEREE', team: 'R', x: 0, z: 10, tx: 0, tz: 10 });
+
+function simulateTick() {
+  gs.tick++;
+  gs.gameMinute = (90 * gs.tick) / 5400;
+  const isSecond = gs.gameMinute >= 45;
+  gs.countdown = Math.max(0, isSecond ? 90 - gs.gameMinute : 45 - gs.gameMinute);
+
+  if (gs.gameMinute > 90) { gs.running = false; return; }
+  if (gs.gameMinute >= 45 && !gs.halfTime) { gs.halfTime = true; gs.ballX = 0; gs.ballZ = 0; }
+
+  const t = gs.tick, m = Math.floor(footballHash(t * 1.7, 3) * 100);
+  gs.possession = footballHash(m + t * 1.3, 5) > 0.45 ? 0 : 1;
+
+  const base = 0.0023 * 0.0006998 * Math.pow(0.03, 1.001234);
+  gs.force = base * (1 + footballHash(t * 2.7, 3) * 2);
+  gs.moveId = Math.floor(footballHash(t * 3.1 + m, 4) * 43);
+
+  const dir = gs.possession === 0 ? 1 : -1;
+  const step = footballHash(t * 3.3 + m * 7, 4) * 2;
+  const prevX = gs.ballX;
+  gs.ballX += step * dir * (0.5 + footballHash(t * 1.1, 3));
+  gs.ballZ += (footballHash(t * 2.2 + m, 3) - 0.5) * 3;
+  gs.ballX = Math.max(-52.5, Math.min(52.5, gs.ballX));
+  gs.ballZ = Math.max(-34, Math.min(34, gs.ballZ));
+  gs.gamePace = Math.abs(gs.ballX - prevX);
+
+  // Goal check
+  if (Math.abs(gs.ballX) > 50 && gs.moveId >= 19 && gs.moveId <= 24) {
+    if (footballHash(t * 5 + m * 20, 7) > 0.4 && Math.abs(gs.ballZ) < 7.32) {
+      if (gs.ballX > 0) gs.homeGoals++; else gs.awayGoals++;
+      gs.ballX = 0; gs.ballZ = 0; gs.events++;
+    }
+  }
+
+  // Move players toward ball
+  gs.players.forEach((p, i) => {
+    if (p.team === 'R') {
+      p.tx = gs.ballX * 0.6 + (footballHash(t * 0.7 + i, 3) - 0.4) * 15;
+      p.tz = gs.ballZ * 0.4 + 8;
+    } else {
+      const pull = i < 4 ? 0.15 : i < 10 ? 0.45 : 0.7;
+      p.tx = gs.ballX * pull + (footballHash(t * 0.3 + i * 7.7, 3) - 0.4) * 10 + (p.team === 'H' ? -5 : 5) * (1 - pull);
+      p.tz = gs.ballZ * pull + (footballHash(t * 0.3 + i * 7.7 + 500, 3) - 0.5) * 20;
+    }
+    p.tx = Math.max(-52, Math.min(52, p.tx));
+    p.tz = Math.max(-33, Math.min(33, p.tz));
+    p.x += (p.tx - p.x) * 0.08;
+    p.z += (p.tz - p.z) * 0.08;
+  });
+
+  // Cards
+  if (gs.moveId === 33 && footballHash(t * 11.1 + m * 7.7, 5) < 0.02) {
+    gs.yellowCards++; gs.events++;
+  }
+}
+
+// ── Calculate row data for each entity ──
+function calcRow(p, idx) {
+  const bxN = (p.x + 52.5) / 105;
+  const bzN = (p.z + 34) / 68;
+  const distGoalL = Math.sqrt((p.x + 52.5) ** 2 + p.z ** 2);
+  const distGoalR = Math.sqrt((p.x - 52.5) ** 2 + p.z ** 2);
+  const distGoalMin = Math.min(distGoalL, distGoalR);
+  const distBall = Math.sqrt((p.x - gs.ballX) ** 2 + (p.z - gs.ballZ) ** 2);
+  const refP = gs.players[gs.players.length - 1];
+  const distRef = Math.sqrt((p.x - refP.x) ** 2 + (p.z - refP.z) ** 2);
+
+  let nearby = 0;
+  gs.players.forEach(o => { if (o !== p && Math.sqrt((o.x - p.x) ** 2 + (o.z - p.z) ** 2) < 10) nearby++; });
+
+  const goalProb = Math.exp(-distGoalMin / 25) * 60;
+  const cardRisk = distGoalMin < 5 ? 85 : distGoalMin < 25 ? 35 : 5;
+  const zone = Math.abs(zoneSignal(bxN, bzN, Math.abs(bxN - 0.5) < 0.15)) * 100;
+  const quad = bxN < 0.5 ? (bzN < 0.5 ? 'Q1' : 'Q2') : (bzN > 0.5 ? 'Q3' : 'Q4');
+  const ballForce = Math.exp(-distBall / 10) * 100;
+  const laplace = laplaceZone(bxN, true) * 1000;
+  const ock = ockTima(bxN, gs.homeGoals + gs.awayGoals) * 1000;
+  const crowdRisk = nearby * 8;
+  const foulSev = distGoalMin < 5 ? 180 : distGoalMin < 15 ? 170 : distGoalMin < 25 ? 165 : 133;
+  const switchF = playerSwitchFactor(bxN) * 100;
+  const territory = distGoalMin < 25 ? 'ATTACK' : distGoalMin < 45 ? 'MID' : 'DEFEND';
+  const violations = cardRisk > 50 ? 'HIGH' : cardRisk > 20 ? 'MED' : 'LOW';
+  const commotion = nearby > 4 ? 'CROWD' : nearby > 2 ? 'GROUP' : 'OPEN';
+  const opGambler = goalProb > 20 ? 'YES' : 'NO';
+  const tl = cardRisk > 50 ? 'RED' : cardRisk > 20 ? 'YELLOW' : 'GREEN';
+  const stayPct = Math.max(5, 100 - cardRisk - crowdRisk * 0.5);
+  const sample = (goalProb * switchF * (1 + ock) / 10000).toFixed(8);
+
+  return [
+    'P' + (idx + 1), p.name, p.team,
+    p.x.toFixed(1), p.z.toFixed(1),
+    goalProb.toFixed(1), cardRisk.toFixed(0), zone.toFixed(1), quad,
+    distBall.toFixed(1), ballForce.toFixed(1), laplace.toFixed(2), ock.toFixed(2),
+    nearby, crowdRisk.toFixed(0), distRef.toFixed(1), foulSev,
+    switchF.toFixed(1), territory, violations, commotion, opGambler, tl,
+    stayPct.toFixed(0), sample
+  ];
+}
+
+function tlClass(val, col) {
+  if (col === 'TrafficLight' || col === 'CardRisk%') {
+    if (val === 'RED' || parseFloat(val) > 50) return 'tl-red';
+    if (val === 'YELLOW' || parseFloat(val) > 20) return 'tl-yellow';
+    return 'tl-green';
+  }
+  if (col === 'Violations') return val === 'HIGH' ? 'tl-red' : val === 'MED' ? 'tl-yellow' : 'tl-green';
+  if (col === 'OpponentGambler') return val === 'YES' ? 'tl-orange' : 'tl-blue';
+  if (col === 'Territory') return val === 'ATTACK' ? 'tl-red' : val === 'MID' ? 'tl-yellow' : 'tl-green';
+  if (col === 'Commotion') return val === 'CROWD' ? 'tl-purple' : val === 'GROUP' ? 'tl-orange' : 'tl-green';
+  if (col === 'GoalProb%' && parseFloat(val) > 20) return 'tl-red';
+  if (col === 'StayInGame%' && parseFloat(val) < 50) return 'tl-red';
+  const v = parseFloat(val);
+  if (!isNaN(v)) {
+    if (v > 0.056) return 'tl-red';
+    if (v > 0.035) return 'tl-yellow';
+    return 'tl-green';
+  }
+  return '';
+}
+
+// ── Build table header ──
+const thead = document.getElementById('tableHead');
+const headRow = document.createElement('tr');
+COLUMNS.forEach(c => { const th = document.createElement('th'); th.textContent = c; headRow.appendChild(th); });
+thead.appendChild(headRow);
+
+// ── Update table ──
+function updateTable() {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  gs.players.forEach((p, i) => {
+    const row = calcRow(p, i);
+    const tr = document.createElement('tr');
+    row.forEach((val, ci) => {
+      const td = document.createElement('td');
+      td.textContent = val;
+      td.className = tlClass(val, COLUMNS[ci]);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+// ── 2D Field View ──
+function drawField() {
+  const canvas = document.getElementById('field2d');
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const mx = W * 0.05, my = H * 0.05;
+  const fw = W - mx * 2, fh = H - my * 2;
+
+  function fx(x) { return mx + ((x + 52.5) / 105) * fw; }
+  function fz(z) { return my + ((z + 34) / 68) * fh; }
+
+  // Background
+  ctx.fillStyle = '#0a1a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Pitch
+  ctx.fillStyle = '#1a4a1a';
+  ctx.fillRect(mx, my, fw, fh);
+
+  // Lines
+  ctx.strokeStyle = '#ffffff44';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mx, my, fw, fh);
+  ctx.beginPath(); ctx.moveTo(fx(0), my); ctx.lineTo(fx(0), my + fh); ctx.stroke();
+  ctx.beginPath(); ctx.arc(fx(0), fz(0), fw * 0.08, 0, Math.PI * 2); ctx.stroke();
+
+  // Goal areas
+  ctx.strokeStyle = '#ffffff33';
+  ctx.strokeRect(fx(-52.5), fz(-20), fw * 0.15, fz(20) - fz(-20));
+  ctx.strokeRect(fx(52.5) - fw * 0.15, fz(-20), fw * 0.15, fz(20) - fz(-20));
+
+  // Zone circles (red/yellow/green)
+  [[-52.5, 0], [52.5, 0]].forEach(([gx, gz]) => {
+    [[5, '#ff222244'], [15, '#ffaa0033'], [25, '#ffff0022'], [45, '#44ff4411']].forEach(([r, col]) => {
+      ctx.strokeStyle = col;
+      ctx.beginPath(); ctx.arc(fx(gx), fz(gz), (r / 105) * fw, 0, Math.PI * 2); ctx.stroke();
+    });
+  });
+
+  // Ball
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(fx(gs.ballX), fz(gs.ballZ), 5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#00ff88';
+  ctx.font = '9px monospace';
+  ctx.fillText('BALL', fx(gs.ballX) - 12, fz(gs.ballZ) - 8);
+
+  // Players with data
+  gs.players.forEach((p, i) => {
+    const px = fx(p.x), pz = fz(p.z);
+    const row = calcRow(p, i);
+    const isHome = p.team === 'H';
+    const isRef = p.team === 'R';
+
+    // Player dot
+    ctx.fillStyle = isRef ? '#888888' : isHome ? '#2979ff' : '#ff6d00';
+    ctx.beginPath(); ctx.arc(px, pz, isRef ? 4 : 5, 0, Math.PI * 2); ctx.fill();
+
+    // Card risk color ring
+    const cr = parseFloat(row[6]);
+    ctx.strokeStyle = cr > 50 ? '#ff2222' : cr > 20 ? '#ffcc00' : '#44ff44';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(px, pz, 7, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1;
+
+    // Name + key numbers
+    ctx.fillStyle = isRef ? '#aaaaaa' : isHome ? '#88bbff' : '#ffaa66';
+    ctx.font = '8px monospace';
+    ctx.fillText(p.name.substring(0, 6), px - 15, pz - 10);
+
+    // Data below player
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '7px monospace';
+    const gp = row[5], tl = row[22], stay = row[23];
+    ctx.fillText('G:' + gp + ' ' + tl + ' S:' + stay + '%', px - 20, pz + 15);
+    ctx.fillText('d:' + row[9] + ' n:' + row[13], px - 15, pz + 23);
+  });
+
+  // Title
+  ctx.fillStyle = '#00e676';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText('2D FIELD MAP | ' + gs.homeName + ' vs ' + gs.awayName + ' | ' + Math.floor(gs.countdown) + ':' + Math.floor((gs.countdown % 1) * 60).toString().padStart(2, '0') + ' ' + (gs.gameMinute < 45 ? '1ST' : '2ND'), 10, 16);
+}
+
+// ── View switching ──
+function switchView(view) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  if (view === 'table') {
+    document.querySelectorAll('.tab')[0].classList.add('active');
+    document.getElementById('tableView').classList.add('active');
+  } else {
+    document.querySelectorAll('.tab')[1].classList.add('active');
+    document.getElementById('fieldView').classList.add('active');
+  }
+}
+
+// ── Platform detect ──
+const ua = navigator.userAgent;
+let plat = 'Unknown';
+if (/Android/i.test(ua)) plat = 'Android';
+else if (/iPhone|iPad/i.test(ua)) plat = 'iOS';
+else if (/Mac/i.test(ua)) plat = 'Mac';
+else if (/Linux/i.test(ua)) plat = 'Unix';
+else if (/Win/i.test(ua)) plat = 'Windows';
+document.getElementById('dPlatform').textContent = plat;
+const cores = navigator.hardwareConcurrency || 4;
+const mem = navigator.deviceMemory || 4;
+const ramS = mem * Math.exp(-(2.5 * cores) / 14.031);
+const cpuM = cores * 2.5 * (1 - Math.exp(-mem / 16));
+const perf = Math.round(cpuM / (cpuM + ramS) * 100);
+document.getElementById('dPerf').textContent = perf;
+
+// ── Start match ──
+const CONTINENTS = [
+  { home: 'ENGLAND', away: 'FRANCE' }, { home: 'SPAIN', away: 'GERMANY' },
+  { home: 'ITALY', away: 'PORTUGAL' }, { home: 'BRAZIL', away: 'ARGENTINA' }
+];
+const match = CONTINENTS[Math.floor(Math.random() * CONTINENTS.length)];
+gs.homeName = match.home; gs.awayName = match.away;
+document.getElementById('dHomeName').textContent = match.home;
+document.getElementById('dAwayName').textContent = match.away;
+gs.running = true;
+
+// ── Game loop ──
+setInterval(() => {
+  if (!gs.running) return;
+  simulateTick();
+
+  // Update header
+  const cdM = Math.floor(gs.countdown);
+  const cdS = Math.floor((gs.countdown % 1) * 60);
+  document.getElementById('dTime').textContent = cdM.toString().padStart(2, '0') + ':' + cdS.toString().padStart(2, '0');
+  document.getElementById('dHalf').textContent = gs.gameMinute < 45 ? '1ST' : '2ND';
+  document.getElementById('dScore').textContent = gs.homeGoals + ' - ' + gs.awayGoals;
+
+  // Update active view
+  if (document.getElementById('tableView').classList.contains('active')) updateTable();
+  else drawField();
+
+  // Status bar
+  document.getElementById('statusLeft').textContent = 'TICK: ' + gs.tick + ' | PACE: ' + (gs.gamePace * 60).toFixed(1) + ' | MOVE: #' + gs.moveId;
+  document.getElementById('statusRight').textContent = 'YC: ' + gs.yellowCards + ' | RC: ' + gs.redCards + ' | EVENTS: ' + gs.events + ' | ' + plat + ' ' + perf + '%';
+}, 1000);
+
+</script>
+</body>
+</html>
