@@ -884,7 +884,7 @@ function getMovementBias(moveId) {
 function simulateTick() {
   if (!gameState.running) return;
   gameState.tick++;
-  gameState.gameMinute = (90.0 * gameState.tick) / 5400;
+  gameState.gameMinute = (90.0 * gameState.tick) / 10800;
 
   // Countdown: 45:00 -> 00:00 per half
   const isSecondHalf = gameState.gameMinute >= 45;
@@ -961,13 +961,13 @@ function simulateTick() {
   // Surface modifier (default natural grass)
   const surfMod = surfaceModifier(0);
 
-  // Combined step with all math
-  const baseStep = footballHash(t * 3.3 + m * 7.0, 4) * 2.0 * forceDirMult;
+  // Combined step with all math - 70000 msg throughput pace
+  const baseStep = footballHash(t * 3.3 + m * 7.0, 4) * 5.0 * forceDirMult;
   const step = baseStep * trigMod * laplaceMod * (0.5 + zoneMod) * quadMod * switchMod;
 
   const prevX = gameState.ballX, prevZ = gameState.ballZ;
-  gameState.ballX += xBias * step * direction;
-  gameState.ballZ += zBias * step * (0.8 + footballHash(t * 1.7, 3) * 0.4);
+  gameState.ballX += xBias * step * direction * 1.5;
+  gameState.ballZ += zBias * step * (0.8 + footballHash(t * 1.7, 3) * 0.6);
 
   // Ock-Tima goal scoring influence near goals
   const ockInfluence = ockTima(bxNorm2, gameState.homeGoals + gameState.awayGoals);
@@ -1817,7 +1817,7 @@ function launchMatch(match, contName) {
 
 // ── Animation loop ──
 let lastSimTime = 0;
-const SIM_INTERVAL = 1000; // 1 tick per second, real-time 90 min (5400 ticks)
+const SIM_INTERVAL = 500; // 2 ticks per second for smoother ball, real-time 90 min
 
 function animate(time) {
   requestAnimationFrame(animate);
@@ -1828,10 +1828,10 @@ function animate(time) {
     lastSimTime = time;
   }
 
-  // Smooth ball movement (follow the play)
-  ball.position.x += (gameState.ballX - ball.position.x) * 0.1;
-  ball.position.z += (gameState.ballZ - ball.position.z) * 0.1;
-  ball.position.y += (gameState.ballY - ball.position.y) * 0.12;
+  // Smooth ball movement (follow the play, fast tracking)
+  ball.position.x += (gameState.ballX - ball.position.x) * 0.15;
+  ball.position.z += (gameState.ballZ - ball.position.z) * 0.15;
+  ball.position.y += (gameState.ballY - ball.position.y) * 0.15;
   ball.rotation.x += 0.05;
   ball.rotation.z += 0.03;
 
@@ -1841,8 +1841,8 @@ function animate(time) {
     const hp = gameState.players.home[i];
     const hDx = hp.tx - hm.position.x;
     const hDz = hp.tz - hm.position.z;
-    hm.position.x += hDx * 0.08;
-    hm.position.z += hDz * 0.08;
+    hm.position.x += hDx * 0.12;
+    hm.position.z += hDz * 0.12;
     // Face direction of movement
     if (Math.abs(hDx) + Math.abs(hDz) > 0.5) {
       hm.rotation.y = Math.atan2(hDx, hDz);
@@ -1860,8 +1860,8 @@ function animate(time) {
     const ap = gameState.players.away[i];
     const aDx = ap.tx - am.position.x;
     const aDz = ap.tz - am.position.z;
-    am.position.x += aDx * 0.08;
-    am.position.z += aDz * 0.08;
+    am.position.x += aDx * 0.12;
+    am.position.z += aDz * 0.12;
     if (Math.abs(aDx) + Math.abs(aDz) > 0.5) {
       am.rotation.y = Math.atan2(aDx, aDz);
     }
