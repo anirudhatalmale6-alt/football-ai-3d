@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI2ORBIT Football AI - Vertical Slice</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:#05070c; overflow:hidden; font-family:'Rajdhani',sans-serif; color:#eaf2ff; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; width:100%; height:100%; }
+
+  /* ---- Launch splash (file-click feel) ---- */
+  #splash { position:fixed; inset:0; z-index:40;
+            background:radial-gradient(circle at 50% 38%, #10203a 0%, #05070c 72%); display:flex; flex-direction:column;
+            align-items:center; justify-content:center; text-align:center; transition:opacity .8s ease; }
+  #splash .brand { font-family:'Orbitron'; font-weight:900; font-size:clamp(28px,6vw,64px); letter-spacing:3px; color:#fff; }
+  #splash .brand b { color:#3d8bff; }
+  #splash .title { font-family:'Orbitron'; font-weight:700; font-size:clamp(13px,2.4vw,22px); letter-spacing:6px; color:#8fb6ef; margin-top:10px; }
+  #splash .env { font-size:13px; letter-spacing:2px; color:#63788f; margin-top:22px; text-transform:uppercase; }
+  #splash .path { font-family:'Rajdhani'; font-size:12px; color:#4a5c72; margin-top:4px; letter-spacing:1px; }
+  #launch { margin-top:34px; font-family:'Orbitron'; font-weight:700; letter-spacing:3px; font-size:15px; color:#fff;
+            background:linear-gradient(90deg,#1565C0,#3d8bff); border:0; padding:15px 42px; border-radius:6px; cursor:pointer;
+            box-shadow:0 8px 30px rgba(61,139,255,.35); transition:transform .15s, box-shadow .15s; }
+  #launch:hover { transform:translateY(-2px); box-shadow:0 12px 40px rgba(61,139,255,.5); }
+  #splash .boot { margin-top:20px; font-size:12px; color:#3f5064; letter-spacing:1px; height:16px; }
+
+  /* ---- Broadcast overlay ---- */
+  .hud { position:fixed; z-index:20; pointer-events:none; opacity:0; transition:opacity 1s ease; }
+  .hud.on { opacity:1; }
+  /* score bug */
+  #scorebug { top:22px; left:22px; display:flex; align-items:stretch; border-radius:6px; overflow:hidden;
+              box-shadow:0 6px 24px rgba(0,0,0,.5); font-family:'Orbitron'; }
+  #scorebug .t { padding:9px 14px; font-weight:700; font-size:15px; letter-spacing:1px; display:flex; align-items:center; gap:8px; }
+  #scorebug .home { background:#c62828; color:#fff; } #scorebug .away { background:#1565C0; color:#fff; }
+  #scorebug .sc { background:#0b0f16; color:#fff; padding:9px 12px; font-size:16px; letter-spacing:1px; }
+  #scorebug .clock { background:#00e08a; color:#04120b; padding:9px 12px; font-size:14px; font-weight:700; }
+  /* REC */
+  #rec { top:24px; right:24px; display:flex; align-items:center; gap:8px; font-family:'Orbitron'; font-size:12px; letter-spacing:2px; color:#ff5b5b; }
+  #rec .dot { width:11px; height:11px; border-radius:50%; background:#ff3b3b; box-shadow:0 0 10px #ff3b3b; animation:blink 1s infinite; }
+  @keyframes blink { 50%{opacity:.25} }
+  /* AI telemetry */
+  #ai { bottom:22px; left:22px; right:22px; display:flex; gap:12px; align-items:flex-end; }
+  #ai .panel { background:rgba(8,13,22,.82); border:1px solid rgba(61,139,255,.35); border-radius:8px; padding:12px 14px;
+               backdrop-filter:blur(6px); min-width:150px; }
+  #ai .panel .k { font-family:'Orbitron'; font-size:9.5px; letter-spacing:2px; color:#6f8ab0; text-transform:uppercase; }
+  #ai .panel .v { font-family:'Orbitron'; font-weight:700; font-size:24px; color:#eaf2ff; line-height:1.1; margin-top:3px; }
+  #ai .panel .v small { font-size:13px; color:#8fb6ef; }
+  #ai .brainlabel { position:absolute; bottom:118px; left:24px; font-family:'Orbitron'; font-size:10px; letter-spacing:4px; color:#3d8bff; }
+  #ai .bar { height:6px; background:#1b2635; border-radius:4px; margin-top:7px; overflow:hidden; }
+  #ai .bar > span { display:block; height:100%; width:0; background:linear-gradient(90deg,#1565C0,#3d8bff,#00e08a); transition:width .3s; }
+  #ai .ref { background:rgba(8,13,22,.82); border:1px solid rgba(0,224,138,.4); border-radius:8px; padding:12px 14px; }
+  #ai .ref .v { color:#00e08a; font-size:15px; }
+  /* goal flash */
+  #goal { position:fixed; inset:0; z-index:30; display:flex; align-items:center; justify-content:center; pointer-events:none;
+          font-family:'Orbitron'; font-weight:900; font-size:clamp(40px,14vw,150px); letter-spacing:6px; color:#fff;
+          text-shadow:0 0 40px #3d8bff, 0 0 80px #1565C0; opacity:0; transform:scale(.7); }
+  #goal.show { animation:goalpop 2.4s ease; }
+  @keyframes goalpop { 0%{opacity:0;transform:scale(.6)} 15%{opacity:1;transform:scale(1.05)} 80%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(1.1)} }
+  /* footer credit */
+  #cred { position:fixed; bottom:8px; right:14px; z-index:20; font-size:11px; color:#3f5064; letter-spacing:1px; opacity:.8; }
+  #tag { position:fixed; top:50%; right:24px; transform:translateY(-50%); z-index:20; writing-mode:vertical-rl;
+         font-family:'Orbitron'; font-size:10px; letter-spacing:5px; color:#24344a; }
+</style>
+</head>
+<body>
+<div id="app"><canvas id="c"></canvas></div>
+
+<!-- Launch splash -->
+<div id="splash">
+  <div class="brand">AI2<b>ORBIT</b></div>
+  <div class="title">FOOTBALL AI ENGINE</div>
+  <div class="env">Environment &middot; PC &middot; Windows 11</div>
+  <div class="path">Resource Management Control &rsaquo; FootballAI.exe</div>
+  <button id="launch">&#9654;&nbsp; LAUNCH</button>
+  <div class="boot" id="boot"></div>
+</div>
+
+<!-- Broadcast HUD -->
+<div id="scorebug" class="hud">
+  <div class="t home">ATL</div>
+  <div class="sc"><span id="scHome">0</span> - <span id="scAway">0</span></div>
+  <div class="t away">ORB</div>
+  <div class="clock" id="clock">00:00</div>
+</div>
+<div id="rec" class="hud"><span class="dot"></span> LIVE &middot; AI ENGINE</div>
+<div id="tag">NETSWITCH &middot; FOOTBALL AI</div>
+
+<div id="ai" class="hud">
+  <div class="brainlabel">&#9679; AI ENGINE TELEMETRY (THE BRAIN)</div>
+  <div class="panel">
+    <div class="k">Goal Probability</div>
+    <div class="v"><span id="gp">0</span><small>%</small></div>
+    <div class="bar"><span id="gpbar"></span></div>
+  </div>
+  <div class="panel">
+    <div class="k">Force Vector</div>
+    <div class="v"><span id="fv">0.0</span><small> N</small></div>
+    <div class="bar"><span id="fvbar"></span></div>
+  </div>
+  <div class="panel">
+    <div class="k">Prediction</div>
+    <div class="v" style="font-size:16px" id="pred">BUILD-UP</div>
+  </div>
+  <div class="panel ref">
+    <div class="k">Referee AI</div>
+    <div class="v" id="ref">PLAY ON</div>
+  </div>
+</div>
+
+<div id="goal">GOAL!</div>
+<div id="cred">(c) 2026 AI2ORBIT Co. &middot; Vertical Slice v1.0</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070b12);
+scene.fog = new THREE.Fog(0x070b12, 60, 150);
+
+const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.1, 500);
+function resize(){ camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
+addEventListener('resize', resize); resize();
+
+// ---- Pitch dimensions ----
+const PW = 68, PL = 105;            // pitch width/length (m)
+const HX = PW/2, HZ = PL/2;
+
+// ---- Lighting ----
+scene.add(new THREE.HemisphereLight(0xaecbff, 0x0a1220, 0.7));
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+key.position.set(40,70,30); key.castShadow = true;
+key.shadow.mapSize.set(2048,2048);
+key.shadow.camera.left=-70; key.shadow.camera.right=70; key.shadow.camera.top=70; key.shadow.camera.bottom=-70;
+scene.add(key);
+// floodlights glow
+[[-HX-6,-HZ-6],[HX+6,-HZ-6],[-HX-6,HZ+6],[HX+6,HZ+6]].forEach(([x,z])=>{
+  const l = new THREE.PointLight(0xbfd8ff, 0.5, 120); l.position.set(x,32,z); scene.add(l);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,32), new THREE.MeshStandardMaterial({color:0x1a2536}));
+  pole.position.set(x,16,z); scene.add(pole);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(4,1.4,1.4), new THREE.MeshStandardMaterial({color:0xdfe9ff, emissive:0x88aaff, emissiveIntensity:1.2}));
+  head.position.set(x,32,z); scene.add(head);
+});
+
+// ---- Turf with mowing stripes ----
+const turf = new THREE.Group();
+for(let i=0;i<14;i++){
+  const w = PW/14;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, PL),
+     new THREE.MeshStandardMaterial({color: i%2? 0x1f7a34 : 0x25913e, roughness:1}));
+  m.rotation.x = -Math.PI/2; m.position.set(-HX + w*(i+0.5), 0, 0); m.receiveShadow = true;
+  turf.add(m);
+}
+scene.add(turf);
+
+// ---- Field lines ----
+const lineMat = new THREE.LineBasicMaterial({color:0xffffff, transparent:true, opacity:0.85});
+function lineLoop(pts){ const g=new THREE.BufferGeometry().setFromPoints(pts.map(p=>new THREE.Vector3(p[0],0.02,p[1]))); return new THREE.LineLoop(g,lineMat); }
+function lineSeg(pts){ const g=new THREE.BufferGeometry().setFromPoints(pts.map(p=>new THREE.Vector3(p[0],0.02,p[1]))); return new THREE.Line(g,lineMat); }
+scene.add(lineLoop([[-HX,-HZ],[HX,-HZ],[HX,HZ],[-HX,HZ]]));      // boundary
+scene.add(lineSeg([[-HX,0],[HX,0]]));                             // halfway
+const circ=[]; for(let a=0;a<=64;a++){const t=a/64*Math.PI*2; circ.push([Math.cos(t)*9.15, Math.sin(t)*9.15]);} scene.add(lineLoop(circ));
+[[-1,-HZ],[1,HZ]].forEach(()=>{});
+// penalty boxes + goals
+[[-1],[1]].forEach(s=>{ const dir=s[0];
+  scene.add(lineLoop([[-20.16,dir*HZ],[20.16,dir*HZ],[20.16,dir*(HZ-16.5)],[-20.16,dir*(HZ-16.5)]]));
+  scene.add(lineLoop([[-9.16,dir*HZ],[9.16,dir*HZ],[9.16,dir*(HZ-5.5)],[-9.16,dir*(HZ-5.5)]]));
+});
+// goals
+function goal(zside){
+  const g = new THREE.Group(); const post = new THREE.MeshStandardMaterial({color:0xffffff});
+  const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,2.44),post); p1.position.set(-3.66,1.22,0);
+  const p2 = p1.clone(); p2.position.x=3.66;
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,7.32),post); bar.rotation.z=Math.PI/2; bar.position.y=2.44;
+  g.add(p1,p2,bar); g.position.set(0,0,zside*HZ); g.rotation.y = zside>0?0:Math.PI; return g;
+}
+scene.add(goal(1)); scene.add(goal(-1));
+// simple stands
+[[-1],[1]].forEach(s=>{ const stand=new THREE.Mesh(new THREE.BoxGeometry(PW+18,7,10),
+   new THREE.MeshStandardMaterial({color:0x111a28})); stand.position.set(0,3.5,s[0]*(HZ+9)); scene.add(stand); });
+[[-1],[1]].forEach(s=>{ const stand=new THREE.Mesh(new THREE.BoxGeometry(10,7,PL+8),
+   new THREE.MeshStandardMaterial({color:0x111a28})); stand.position.set(s[0]*(HX+8),3.5,0); scene.add(stand); });
+
+// ---- Players & ball ----
+function makePlayer(color){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.5,1.1,4,10), new THREE.MeshStandardMaterial({color}));
+  body.position.y=1.1; body.castShadow=true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34,16,16), new THREE.MeshStandardMaterial({color:0xf0c9a0}));
+  head.position.y=2.1; head.castShadow=true; g.add(head);
+  scene.add(g); return g;
+}
+const RED=0xd23b3b, BLUE=0x2f7bd6;
+const home=[], away=[];
+// formation-ish scatter
+const homePos=[[-6,-30],[-18,-14],[0,-16],[18,-14],[-10,2],[10,2]];
+const awayPos=[[6,30],[18,14],[0,16],[-18,14],[10,-2],[-10,-2]];
+homePos.forEach(p=>{const pl=makePlayer(RED); pl.position.set(p[0],0,p[1]); home.push({m:pl, home:new THREE.Vector3(p[0],0,p[1])});});
+awayPos.forEach(p=>{const pl=makePlayer(BLUE); pl.position.set(p[0],0,p[1]); away.push({m:pl, home:new THREE.Vector3(p[0],0,p[1])});});
+const gkH = makePlayer(0xffd23b); gkH.position.set(0,0,-HZ+2);
+const gkA = makePlayer(0xffd23b); gkA.position.set(0,0,HZ-2);
+
+const ball = new THREE.Mesh(new THREE.SphereGeometry(0.45,20,20),
+   new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.4}));
+ball.position.set(0,0.45,0); ball.castShadow=true; scene.add(ball);
+
+// ---- AI match state ----
+const B = { pos:new THREE.Vector3(0,0.45,0), vel:new THREE.Vector3(), owner:null };
+let attackDir = 1;                 // +1 = attacking away goal (z=+HZ)
+let carrier = home[2];
+let phase='BUILD-UP', refState='PLAY ON', force=0, goalProb=0;
+let score={h:0,a:0}, tGame=0, running=false;
+let lastAction=0, actionGap=1.4;
+
+function goalCenter(dir){ return new THREE.Vector3(0,0.45,dir*HZ); }
+function teamOf(p){ return home.includes(p)?'H':'A'; }
+
+function chooseAction(now){
+  if(!carrier){ return; }
+  const gc = goalCenter(attackDir);
+  const dist = B.pos.distanceTo(gc);
+  const mates = (teamOf(carrier)==='H'?home:away).filter(p=>p!==carrier);
+  // decision: shoot if close & central, else pass forward, else dribble
+  const central = Math.abs(B.pos.x) < 14;
+  if(dist < 26 && central && Math.random()<0.75){
+    // SHOOT
+    phase='SHOT'; force = 78 + Math.random()*40;
+    const target = gc.clone(); target.x += (Math.random()-0.5)*5;
+    B.vel.copy(target.sub(B.pos).setY(0).normalize().multiplyScalar(34));
+    B.owner=null; carrier=null;
+    setTimeout(()=>resolveShot(), 650);
+    actionGap = 1.6;
+  } else {
+    // pick a forward mate
+    let best=null,bs=-1e9;
+    mates.forEach(p=>{ const fwd = attackDir*(p.m.position.z - B.pos.z); const openpen = -Math.abs(p.m.position.x)*0.15;
+      const sc = fwd + openpen + Math.random()*8; if(sc>bs){bs=sc;best=p;} });
+    if(best && Math.random()<0.7){
+      phase='PASS'; force = 30 + Math.random()*25;
+      B.vel.copy(best.m.position.clone().setY(0.45).sub(B.pos).setY(0).normalize().multiplyScalar(22));
+      B.owner=null; const rx=best; setTimeout(()=>{ if(!B.owner){carrier=rx; B.owner=rx;} }, 500);
+    } else {
+      phase='DRIBBLE'; force = 18 + Math.random()*12;
+      const fwd = new THREE.Vector3((Math.random()-0.5)*6,0,attackDir*10);
+      B.vel.copy(fwd.normalize().multiplyScalar(9));
+    }
+    actionGap = 1.1 + Math.random()*0.7;
+  }
+}
+
+function resolveShot(){
+  const gc = goalCenter(attackDir);
+  const onTarget = Math.abs(B.pos.x) < 3.66 && Math.abs(B.pos.z) > HZ-3;
+  const scored = onTarget && Math.random()<0.62;
+  if(scored){
+    doGoal();   // doGoal() credits the attacking side
+  } else {
+    refState = Math.random()<0.3 ? 'GOAL KICK' : 'SAVE';
+    setTimeout(()=>{ refState='PLAY ON'; }, 1400);
+    kickoffFrom(new THREE.Vector3(0,0.45, attackDir*(HZ-8)));
+    attackDir *= -1; carrier = (attackDir>0?home:away)[2]; B.owner=carrier;
+  }
+}
+
+function doGoal(){
+  // attackDir>0 means home attacking away goal -> home scores
+  if(attackDir>0) score.h++; else score.a++;
+  document.getElementById('scHome').textContent=score.h;
+  document.getElementById('scAway').textContent=score.a;
+  const g=document.getElementById('goal'); g.classList.remove('show'); void g.offsetWidth; g.classList.add('show');
+  refState='GOAL &#10003;'; phase='GOAL';
+  goalCam = 60;
+  setTimeout(()=>{ refState='KICK-OFF'; kickoffFrom(new THREE.Vector3(0,0.45,0)); attackDir*=-1; carrier=(attackDir>0?home:away)[2]; B.owner=carrier;
+    setTimeout(()=>refState='PLAY ON',1200); }, 2400);
+}
+
+function kickoffFrom(p){ B.pos.copy(p); B.vel.set(0,0,0); }
+
+// camera behaviour
+let goalCam=0, camT=0;
+function updateCamera(dt){
+  camT += dt;
+  const look = B.pos.clone();
+  if(goalCam>0){
+    goalCam -= dt*60;
+    // low dramatic angle behind the goal
+    const dir = attackDir>0?1:-1;
+    camera.position.lerp(new THREE.Vector3(6*Math.sin(camT), 4, dir*(HZ+10)), 0.06);
+  } else {
+    // broadcast side cam that follows the ball, slow sweep
+    const sweep = Math.sin(camT*0.12)*22;
+    const target = new THREE.Vector3(B.pos.x*0.5 + sweep, 30, B.pos.z*0.7 - 46);
+    camera.position.lerp(target, 0.04);
+  }
+  camera.lookAt(look.x*0.6, 1.5, look.z*0.7);
+}
+
+// player motion: carrier chases ball, others drift to shape, nearest defender presses
+function updatePlayers(dt){
+  const all=[...home,...away];
+  all.forEach(p=>{
+    let tgt;
+    if(p===carrier){ tgt=B.pos; }
+    else {
+      const isAtt = teamOf(p)===teamOf(carrier||{});
+      // drift toward home slot, biased forward if attacking
+      tgt = p.home.clone();
+      if(carrier){ const bias = teamOf(p)===teamOf(carrier)? attackDir*6 : 0; tgt.z += bias; }
+      // nearest opponent presses ball
+    }
+    const to = tgt.clone().sub(p.m.position); to.y=0;
+    const d = to.length();
+    if(d>0.4){ p.m.position.addScaledVector(to.normalize(), Math.min(d, (p===carrier?9:5.5))*dt); }
+    // face motion
+    if(d>0.2) p.m.rotation.y = Math.atan2(to.x, to.z);
+  });
+  // keepers track ball x within goal
+  gkH.position.x = THREE.MathUtils.clamp(B.pos.x*0.6,-3,3);
+  gkA.position.x = THREE.MathUtils.clamp(B.pos.x*0.6,-3,3);
+}
+
+function updateBall(dt){
+  if(carrier){ // dribble: ball sticks just ahead of carrier
+    const ahead = new THREE.Vector3(Math.sin(carrier.m.rotation.y), 0, Math.cos(carrier.m.rotation.y)).multiplyScalar(1.1);
+    B.pos.lerp(carrier.m.position.clone().add(ahead).setY(0.45), 0.35);
+    B.vel.multiplyScalar(0.9);
+  } else {
+    B.pos.addScaledVector(B.vel, dt);
+    B.vel.multiplyScalar(0.985);
+    B.pos.y = 0.45;
+    // keep in bounds-ish
+    if(Math.abs(B.pos.x)>HX+1){ B.vel.x*=-0.5; B.pos.x=THREE.MathUtils.clamp(B.pos.x,-HX,HX);}
+  }
+  ball.position.copy(B.pos);
+  ball.rotation.x += B.vel.z*dt*2; ball.rotation.z -= B.vel.x*dt*2;
+}
+
+// telemetry (the "brain" outputs)
+function updateTelemetry(){
+  const gc = goalCenter(attackDir);
+  const dist = B.pos.distanceTo(gc);
+  const central = 1 - Math.min(Math.abs(B.pos.x)/HX,1);
+  goalProb = Math.round(THREE.MathUtils.clamp((1 - dist/HZ)*70*central + (phase==='SHOT'?18:0), 1, 96));
+  document.getElementById('gp').textContent = goalProb;
+  document.getElementById('gpbar').style.width = goalProb+'%';
+  document.getElementById('fv').textContent = force.toFixed(1);
+  document.getElementById('fvbar').style.width = Math.min(force,120)/120*100+'%';
+  document.getElementById('pred').textContent = phase;
+  document.getElementById('ref').innerHTML = refState;
+}
+
+// ---- main loop ----
+const clock = new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if(running){
+    tGame += dt;
+    const now = performance.now()/1000;
+    if(now-lastAction > actionGap){ chooseAction(now); lastAction=now; }
+    updatePlayers(dt); updateBall(dt); updateTelemetry();
+    const mm = String(Math.floor(tGame/60)).padStart(2,'0'), ss=String(Math.floor(tGame%60)).padStart(2,'0');
+    document.getElementById('clock').textContent = mm+':'+ss;
+  }
+  updateCamera(dt);
+  renderer.render(scene,camera);
+}
+tick();
+
+// ---- launch sequence ----
+const bootLines=['Loading NetSwitch engine...','Football AI core: 119 checks OK','Force-vector physics online','Referee AI ready','Rendering pipeline attached','Kick-off.'];
+document.getElementById('launch').addEventListener('click', ()=>{
+  const boot=document.getElementById('boot'); let i=0;
+  const iv=setInterval(()=>{ boot.textContent=bootLines[i++]; if(i>=bootLines.length){ clearInterval(iv);
+     const s=document.getElementById('splash'); s.style.opacity=0; setTimeout(()=>s.style.display='none',800);
+     document.querySelectorAll('.hud').forEach(h=>h.classList.add('on'));
+     running=true; B.owner=carrier=home[2]; lastAction=performance.now()/1000;
+  }}, 380);
+});
+</script>
+</body>
+</html>
