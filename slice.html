@@ -71,6 +71,22 @@
           text-shadow:0 0 40px #3d8bff, 0 0 80px #1565C0; opacity:0; transform:scale(.7); }
   #goal.show { animation:goalpop 2.4s ease; }
   @keyframes goalpop { 0%{opacity:0;transform:scale(.6)} 15%{opacity:1;transform:scale(1.05)} 80%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(1.1)} }
+  /* cards tally chip */
+  #cards { top:64px; left:22px; display:flex; gap:11px; background:rgba(8,13,22,.82); border:1px solid rgba(61,139,255,.35);
+           border-radius:8px; padding:8px 12px; backdrop-filter:blur(6px); box-shadow:0 6px 24px rgba(0,0,0,.4); }
+  #cards .cc { display:flex; align-items:center; gap:5px; font-family:'Orbitron'; font-size:13px; font-weight:700; color:#eaf2ff; }
+  #cards .cc i { width:11px; height:15px; border-radius:2px; display:inline-block; }
+  /* card flash (foul call) */
+  #card { position:fixed; inset:0; z-index:29; display:flex; align-items:center; justify-content:center; pointer-events:none;
+          opacity:0; }
+  #card.show { animation:cardpop 2.1s ease; }
+  @keyframes cardpop { 0%{opacity:0;transform:translateY(28px) scale(.82)} 12%{opacity:1;transform:translateY(0) scale(1)}
+                       82%{opacity:1} 100%{opacity:0;transform:translateY(-16px) scale(1.03)} }
+  #card .cwrap { display:flex; align-items:center; gap:22px; background:rgba(6,10,18,.85); border:1px solid rgba(255,255,255,.12);
+                 padding:22px 32px; border-radius:14px; backdrop-filter:blur(6px); box-shadow:0 22px 64px rgba(0,0,0,.65); }
+  #card .cface { width:64px; height:90px; border-radius:8px; transform:rotate(-8deg); }
+  #card .ctxt { font-family:'Orbitron'; font-weight:900; font-size:26px; letter-spacing:2px; color:#fff; }
+  #card .csub { font-family:'Orbitron'; font-size:12px; letter-spacing:4px; color:#8fb6ef; margin-top:7px; }
   /* footer credit */
   #cred { position:fixed; bottom:8px; right:14px; z-index:20; font-size:11px; color:#3f5064; letter-spacing:1px; opacity:.8; }
   #tag { position:fixed; top:50%; right:24px; transform:translateY(-50%); z-index:20; writing-mode:vertical-rl;
@@ -99,6 +115,14 @@
 </div>
 <div id="rec" class="hud"><span class="dot"></span> LIVE &middot; AI ENGINE</div>
 <div id="tag">NETSWITCH &middot; FOOTBALL AI</div>
+
+<!-- Discipline: cards tally (Referee AI: green / yellow / red / black) -->
+<div id="cards" class="hud">
+  <div class="cc"><i style="background:#25c065"></i><span id="cG">0</span></div>
+  <div class="cc"><i style="background:#f7c400"></i><span id="cY">0</span></div>
+  <div class="cc"><i style="background:#e23636"></i><span id="cR">0</span></div>
+  <div class="cc"><i style="background:#111318;border:1px solid #3a3f4a"></i><span id="cB">0</span></div>
+</div>
 
 <!-- Camera / game-view switcher -->
 <div id="views" class="hud">
@@ -137,7 +161,8 @@
 </div>
 
 <div id="goal">GOAL!</div>
-<div id="cred">(c) 2026 AI2ORBIT Co. &middot; Vertical Slice v1.0</div>
+<div id="card"><div class="cwrap"><div class="cface"></div><div class="cinfo"><div class="ctxt">YELLOW CARD</div><div class="csub">BOOKED</div></div></div></div>
+<div id="cred">(c) 2026 AI2ORBIT Co. &middot; Vertical Slice v1.1</div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
@@ -231,9 +256,9 @@ function makePlayer(color){
 }
 const RED=0xd23b3b, BLUE=0x2f7bd6;
 const home=[], away=[];
-// formation-ish scatter
-const homePos=[[-6,-30],[-18,-14],[0,-16],[18,-14],[-10,2],[10,2]];
-const awayPos=[[6,30],[18,14],[0,16],[-18,14],[10,-2],[-10,-2]];
+// full 10-outfield 4-3-3 formations (index 5 = central midfielder = kickoff carrier)
+const homePos=[[-20,-32],[-7,-34],[7,-34],[20,-32], [-16,-16],[0,-18],[16,-16], [-14,2],[0,4],[14,2]];
+const awayPos=[[20,32],[7,34],[-7,34],[-20,32], [16,16],[0,18],[-16,16], [14,-2],[0,-4],[-14,-2]];
 homePos.forEach(p=>{const pl=makePlayer(RED); pl.position.set(p[0],0,p[1]); home.push({m:pl, home:new THREE.Vector3(p[0],0,p[1])});});
 awayPos.forEach(p=>{const pl=makePlayer(BLUE); pl.position.set(p[0],0,p[1]); away.push({m:pl, home:new THREE.Vector3(p[0],0,p[1])});});
 const gkH = makePlayer(0xffd23b); gkH.position.set(0,0,-HZ+2);
@@ -246,7 +271,7 @@ ball.position.set(0,0.45,0); ball.castShadow=true; scene.add(ball);
 // ---- AI match state ----
 const B = { pos:new THREE.Vector3(0,0.45,0), vel:new THREE.Vector3(), owner:null };
 let attackDir = 1;                 // +1 = attacking away goal (z=+HZ)
-let carrier = home[2];
+let carrier = home[5];             // central midfielder
 let phase='BUILD-UP', refState='PLAY ON', force=0, goalProb=0;
 let score={h:0,a:0}, tGame=0, running=false;
 let lastAction=0, actionGap=1.4;
@@ -256,6 +281,8 @@ function teamOf(p){ return home.includes(p)?'H':'A'; }
 
 function chooseAction(now){
   if(!carrier){ return; }
+  // Referee AI: a challenge sometimes ends in a foul (and maybe a card)
+  if(Math.random() < 0.14){ doFoul(); return; }
   const gc = goalCenter(attackDir);
   const dist = B.pos.distanceTo(gc);
   const mates = (teamOf(carrier)==='H'?home:away).filter(p=>p!==carrier);
@@ -266,6 +293,7 @@ function chooseAction(now){
     phase='SHOT'; force = 78 + Math.random()*40;
     const target = gc.clone(); target.x += (Math.random()-0.5)*5;
     B.vel.copy(target.sub(B.pos).setY(0).normalize().multiplyScalar(34));
+    B.vel.y = 6 + Math.random()*5;          // loft: ball flies through the air
     B.owner=null; carrier=null;
     setTimeout(()=>resolveShot(), 650);
     actionGap = 1.6;
@@ -276,7 +304,9 @@ function chooseAction(now){
       const sc = fwd + openpen + Math.random()*8; if(sc>bs){bs=sc;best=p;} });
     if(best && Math.random()<0.7){
       phase='PASS'; force = 30 + Math.random()*25;
+      const pdist = best.m.position.distanceTo(B.pos);
       B.vel.copy(best.m.position.clone().setY(0.45).sub(B.pos).setY(0).normalize().multiplyScalar(22));
+      if(pdist > 22){ B.vel.y = 3.5 + Math.random()*2.5; }   // lofted pass over distance
       B.owner=null; const rx=best; setTimeout(()=>{ if(!B.owner){carrier=rx; B.owner=rx;} }, 500);
     } else {
       phase='DRIBBLE'; force = 18 + Math.random()*12;
@@ -297,7 +327,7 @@ function resolveShot(){
     refState = Math.random()<0.3 ? 'GOAL KICK' : 'SAVE';
     setTimeout(()=>{ refState='PLAY ON'; }, 1400);
     kickoffFrom(new THREE.Vector3(0,0.45, attackDir*(HZ-8)));
-    attackDir *= -1; carrier = (attackDir>0?home:away)[2]; B.owner=carrier;
+    attackDir *= -1; carrier = (attackDir>0?home:away)[5]; B.owner=carrier;
   }
 }
 
@@ -309,11 +339,61 @@ function doGoal(){
   const g=document.getElementById('goal'); g.classList.remove('show'); void g.offsetWidth; g.classList.add('show');
   refState='GOAL &#10003;'; phase='GOAL';
   goalCam = 60;
-  setTimeout(()=>{ refState='KICK-OFF'; kickoffFrom(new THREE.Vector3(0,0.45,0)); attackDir*=-1; carrier=(attackDir>0?home:away)[2]; B.owner=carrier;
+  setTimeout(()=>{ refState='KICK-OFF'; kickoffFrom(new THREE.Vector3(0,0.45,0)); attackDir*=-1; carrier=(attackDir>0?home:away)[5]; B.owner=carrier;
     setTimeout(()=>refState='PLAY ON',1200); }, 2400);
 }
 
 function kickoffFrom(p){ B.pos.copy(p); B.vel.set(0,0,0); }
+
+// ---- Referee AI: fouls & discipline cards (green / yellow / red / black) ----
+const cards = { GREEN:0, YELLOW:0, RED:0, BLACK:0 };
+function updateCards(){
+  document.getElementById('cG').textContent = cards.GREEN;
+  document.getElementById('cY').textContent = cards.YELLOW;
+  document.getElementById('cR').textContent = cards.RED;
+  document.getElementById('cB').textContent = cards.BLACK;
+}
+function showCard(card){
+  cards[card.t]++;
+  const el = document.getElementById('card');
+  const face = el.querySelector('.cface');
+  face.style.background = card.c;
+  face.style.boxShadow = '0 0 34px ' + card.c;
+  el.querySelector('.ctxt').textContent = card.label;
+  el.querySelector('.csub').textContent = card.msg;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  updateCards();
+}
+function doFoul(){
+  // nearest opponent to the carrier commits the foul
+  const oppTeam = teamOf(carrier)==='H' ? away : home;
+  let offender=null, nd=1e9;
+  oppTeam.forEach(p=>{ const d=p.m.position.distanceTo(carrier.m.position); if(d<nd){ nd=d; offender=p; } });
+  phase='FOUL'; force=0;
+  const spot = carrier.m.position.clone().setY(0.45);
+  // card severity: mostly play-on free kicks, escalating to green/yellow/red/black
+  const r = Math.random();
+  let card = null;
+  if      (r >= 0.45 && r < 0.72) card = { t:'GREEN',  c:'#25c065', label:'GREEN CARD',  msg:'CAUTION' };
+  else if (r >= 0.72 && r < 0.90) card = { t:'YELLOW', c:'#f7c400', label:'YELLOW CARD', msg:'BOOKED' };
+  else if (r >= 0.90 && r < 0.975)card = { t:'RED',    c:'#e23636', label:'RED CARD',    msg:'SENT OFF' };
+  else if (r >= 0.975)            card = { t:'BLACK',  c:'#111318', label:'BLACK CARD',  msg:'MISCONDUCT' };
+  if(card){
+    showCard(card);
+    refState = card.label;
+    // red / black -> offender is dismissed and leaves the pitch
+    if((card.t==='RED' || card.t==='BLACK') && offender){
+      offender.m.visible = false;
+      const i = oppTeam.indexOf(offender); if(i>=0) oppTeam.splice(i,1);
+    }
+  } else {
+    refState = 'FREE KICK';
+  }
+  // free kick: fouled team restarts from the spot, keeps possession
+  B.pos.copy(spot); B.vel.set(0,0,0); B.owner = carrier;
+  actionGap = 1.9;
+  setTimeout(()=>{ refState = 'FREE KICK'; setTimeout(()=>{ if(phase==='FOUL'){ phase='BUILD-UP'; refState='PLAY ON'; } }, 900); }, card?1400:150);
+}
 
 // camera behaviour - three selectable game views
 let goalCam=0, camT=0, viewMode='BROADCAST';
@@ -392,11 +472,16 @@ function updateBall(dt){
   if(carrier){ // dribble: ball sticks just ahead of carrier
     const ahead = new THREE.Vector3(Math.sin(carrier.m.rotation.y), 0, Math.cos(carrier.m.rotation.y)).multiplyScalar(1.1);
     B.pos.lerp(carrier.m.position.clone().add(ahead).setY(0.45), 0.35);
-    B.vel.multiplyScalar(0.9);
+    B.vel.set(0,0,0);
   } else {
     B.pos.addScaledVector(B.vel, dt);
-    B.vel.multiplyScalar(0.985);
-    B.pos.y = 0.45;
+    B.vel.y -= 20 * dt;               // gravity: the ball arcs and drops
+    B.vel.x *= 0.992; B.vel.z *= 0.992;
+    if(B.pos.y <= 0.45){              // ground contact -> bounce, then settle
+      B.pos.y = 0.45;
+      if(B.vel.y < 0){ B.vel.y = -B.vel.y * 0.45; if(B.vel.y < 1.4) B.vel.y = 0; }
+      B.vel.x *= 0.9; B.vel.z *= 0.9;
+    }
     // keep in bounds-ish
     if(Math.abs(B.pos.x)>HX+1){ B.vel.x*=-0.5; B.pos.x=THREE.MathUtils.clamp(B.pos.x,-HX,HX);}
   }
@@ -437,13 +522,13 @@ function tick(){
 tick();
 
 // ---- launch sequence ----
-const bootLines=['Loading NetSwitch engine...','Football AI core: 119 checks OK','Force-vector physics online','Referee AI ready','Rendering pipeline attached','Kick-off.'];
+const bootLines=['Loading NetSwitch engine...','Football AI core: 119 checks OK','Force-vector physics online','Referee AI: fouls & cards ready','Ball flight / arc physics online','Rendering pipeline attached','Kick-off.'];
 document.getElementById('launch').addEventListener('click', ()=>{
   const boot=document.getElementById('boot'); let i=0;
   const iv=setInterval(()=>{ boot.textContent=bootLines[i++]; if(i>=bootLines.length){ clearInterval(iv);
      const s=document.getElementById('splash'); s.style.opacity=0; setTimeout(()=>s.style.display='none',800);
      document.querySelectorAll('.hud').forEach(h=>h.classList.add('on'));
-     running=true; B.owner=carrier=home[2]; lastAction=performance.now()/1000;
+     running=true; B.owner=carrier=home[5]; lastAction=performance.now()/1000;
   }}, 380);
 });
 </script>
