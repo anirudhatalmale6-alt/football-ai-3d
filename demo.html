@@ -1,0 +1,977 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>AI2ORBIT Football AI - Playable (frozen demo build)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;600;700&display=swap');
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#05070b;overflow:hidden;
+            font-family:Rajdhani,system-ui,sans-serif;color:#cfe3ff;
+            -webkit-user-select:none;user-select:none;touch-action:none}
+  canvas{display:block}
+  .of{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+      flex-direction:column;background:radial-gradient(circle at 50% 40%,#0d1626,#05070b 70%);
+      z-index:50;text-align:center;padding:20px}
+  .of h1{font-family:Orbitron,sans-serif;font-size:clamp(26px,6vw,52px);font-weight:900;
+         margin:0;color:#fff;letter-spacing:2px}
+  .of h1 span{color:#3b82f6}
+  .of h2{font-family:Orbitron,sans-serif;font-size:clamp(12px,2.4vw,17px);font-weight:700;
+         letter-spacing:6px;color:#7fb0ea;margin:8px 0 26px}
+  .of p{max-width:640px;font-size:15px;line-height:1.6;color:#8fb2d8;margin:0 0 22px}
+  .btn{font-family:Orbitron,sans-serif;font-weight:700;letter-spacing:3px;font-size:15px;
+       color:#fff;background:linear-gradient(180deg,#2f7ef0,#1a56c4);border:0;border-radius:8px;
+       padding:15px 42px;cursor:pointer;box-shadow:0 0 32px rgba(47,126,240,.45)}
+  .btn:active{transform:translateY(1px)}
+  .keys{display:grid;grid-template-columns:auto auto;gap:5px 16px;font-size:13px;
+        color:#9dbde0;margin-bottom:24px}
+  .keys b{font-family:Orbitron,sans-serif;color:#dbe9ff;font-weight:700;text-align:right}
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:20}
+  .sb{position:absolute;left:14px;top:12px;display:flex;align-items:stretch;
+      font-family:Orbitron,sans-serif;font-weight:700;border-radius:7px;overflow:hidden;
+      box-shadow:0 4px 20px rgba(0,0,0,.6)}
+  .sb div{padding:8px 13px;font-size:15px;display:flex;align-items:center}
+  .t1{background:#c0243a;color:#fff}.t2{background:#1e50c8;color:#fff}
+  .sc{background:#0d1626;color:#fff;letter-spacing:2px}
+  .ck{background:#12b981;color:#03291c}
+  .cards{position:absolute;left:14px;top:52px;display:flex;gap:7px;background:rgba(9,14,24,.85);
+         padding:6px 10px;border-radius:6px;font-family:Orbitron,sans-serif;font-size:11px}
+  .cd{display:flex;align-items:center;gap:4px}
+  .sw{width:11px;height:15px;border-radius:2px;display:inline-block}
+  .tele{position:absolute;right:14px;top:12px;background:rgba(9,14,24,.85);border-radius:7px;
+        padding:9px 13px;font-family:Orbitron,sans-serif;font-size:11px;min-width:186px;
+        border:1px solid #1b3a63}
+  .tele .row{display:flex;justify-content:space-between;gap:14px;margin:3px 0;color:#7fb0ea}
+  .tele .row b{color:#fff;font-size:13px}
+  .bot{position:absolute;left:14px;bottom:12px;display:flex;gap:8px;flex-wrap:wrap}
+  .pan{background:rgba(9,14,24,.86);border:1px solid #1b3a63;border-radius:7px;padding:7px 12px;
+       font-family:Orbitron,sans-serif;font-size:10px;color:#6f9fd4;letter-spacing:1px}
+  .pan b{display:block;font-size:16px;color:#fff;letter-spacing:0;margin-top:2px}
+  .bar{display:block;height:4px;background:#12233c;border-radius:2px;margin-top:5px;
+       width:104px;overflow:hidden}
+  .bar i{display:block;height:100%;background:#3b82f6}
+  .flash{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);
+         background:rgba(9,14,24,.94);border-radius:12px;padding:20px 34px;display:none;
+         align-items:center;gap:20px;box-shadow:0 0 46px rgba(0,0,0,.7)}
+  .flash .card{width:60px;height:84px;border-radius:7px}
+  .flash .txt{font-family:Orbitron,sans-serif;font-weight:900;font-size:30px;color:#fff;
+              letter-spacing:2px}
+  .flash .sub{font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:5px;color:#8fb2d8}
+  .toast{position:absolute;left:50%;top:14%;transform:translateX(-50%);font-family:Orbitron,
+         sans-serif;font-weight:900;font-size:clamp(22px,5vw,44px);color:#fff;opacity:0;
+         text-shadow:0 0 26px rgba(59,130,246,.9);letter-spacing:3px}
+  #stick{position:absolute;left:22px;bottom:22px;width:130px;height:130px;border-radius:50%;
+         background:rgba(20,34,56,.5);border:2px solid rgba(120,170,230,.35);display:none;
+         pointer-events:auto;touch-action:none}
+  #knob{position:absolute;left:35px;top:35px;width:60px;height:60px;border-radius:50%;
+        background:rgba(80,140,220,.72)}
+  .abtn{position:absolute;width:74px;height:74px;border-radius:50%;display:none;
+        align-items:center;justify-content:center;font-family:Orbitron,sans-serif;
+        font-weight:700;font-size:12px;color:#fff;pointer-events:auto;
+        border:2px solid rgba(160,200,255,.4);touch-action:none}
+  #bPass{right:120px;bottom:38px;background:rgba(30,80,200,.62)}
+  #bShot{right:26px;bottom:78px;background:rgba(200,40,60,.62)}
+  #bSprint{right:26px;bottom:170px;background:rgba(20,150,110,.55);width:64px;
+           height:64px;font-size:10px}
+  .hint{position:absolute;right:14px;bottom:12px;font-size:11px;color:#5d80ab;text-align:right;
+        font-family:Orbitron,sans-serif;letter-spacing:1px;line-height:1.7}
+  /* A phone is 390 points wide. At that width the scoreboard, the telemetry and the three
+     panels all wanted the same space, and the panels sat underneath the touch controls where
+     a thumb covers them. On a narrow screen everything informative moves to the TOP and the
+     bottom third is left entirely to the hands. */
+  @media (max-width: 620px) {
+    .sb div{padding:5px 8px;font-size:12px}
+    .cards{top:40px;padding:4px 7px;font-size:10px;gap:5px}
+    .tele{padding:5px 8px;font-size:9px;min-width:118px;right:8px}
+    .tele .row{margin:1px 0;gap:8px}
+    .tele .row b{font-size:11px}
+    .bot{top:78px;left:8px;bottom:auto;gap:5px;max-width:62vw}
+    .pan{padding:4px 8px;font-size:8px}
+    .pan b{font-size:12px}
+    .bar{width:64px;height:3px;margin-top:3px}
+    .hint{display:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="of" id="start">
+  <h1>AI2<span>ORBIT</span></h1>
+  <h2>FOOTBALL AI &mdash; PLAYABLE</h2>
+  <p>Ten outfield players a side plus keepers, all articulated, all driven by the engine.
+     You control the highlighted player; the switch is automatic when possession changes.
+     Referee AI is live: fouls are called and cards are shown.</p>
+  <div class="keys">
+    <b>MOVE</b><span>W A S D &nbsp;or&nbsp; arrow keys</span>
+    <b>PASS</b><span>SPACE &mdash; to the best open team-mate</span>
+    <b>SHOOT</b><span>J &mdash; hold longer for more power</span>
+    <b>SPRINT</b><span>SHIFT &mdash; costs stamina</span>
+    <b>TACKLE</b><span>K &mdash; mistimed is a foul</span>
+    <b>SWITCH</b><span>Q &mdash; take the next nearest player</span>
+    <b>CAMERA</b><span>C &mdash; follow or broadcast</span>
+    <b>PAUSE</b><span>P</span>
+  </div>
+  <button class="btn" id="go">KICK OFF</button>
+</div>
+
+<div class="of" id="end" style="display:none">
+  <h1 id="endTitle">FULL TIME</h1>
+  <h2 id="endScore"></h2>
+  <p id="endLine"></p>
+  <button class="btn" id="again">PLAY AGAIN</button>
+</div>
+
+<div id="hud">
+  <div class="sb">
+    <div class="t1" id="nameA">ATL</div>
+    <div class="sc" id="score">0 - 0</div>
+    <div class="t2" id="nameB">ORB</div>
+    <div class="ck" id="clock">00:00</div>
+  </div>
+  <div class="cards">
+    <span class="cd"><i class="sw" style="background:#22c55e"></i><span id="cG">0</span></span>
+    <span class="cd"><i class="sw" style="background:#eab308"></i><span id="cY">0</span></span>
+    <span class="cd"><i class="sw" style="background:#dc2626"></i><span id="cR">0</span></span>
+    <span class="cd"><i class="sw" style="background:#111;border:1px solid #666"></i><span id="cB">0</span></span>
+  </div>
+  <div class="tele">
+    <div class="row"><span>POSSESSION</span><b id="tPos">--</b></div>
+    <div class="row"><span>SHOTS</span><b id="tSh">0 - 0</b></div>
+    <div class="row"><span>BALL SPEED</span><b id="tBall">0.0</b></div>
+    <div class="row"><span>FPS</span><b id="tFps">--</b></div>
+  </div>
+  <div class="bot">
+    <div class="pan">GOAL PROBABILITY<b id="pGoal">0%</b><span class="bar"><i id="bGoal" style="width:0"></i></span></div>
+    <div class="pan">YOUR PLAYER<b id="pWho">--</b><span class="bar"><i id="bSta" style="width:100%"></i></span></div>
+    <div class="pan">REFEREE AI<b id="pRef">PLAY ON</b></div>
+  </div>
+  <div class="flash" id="flash"><div class="card" id="fCard"></div>
+    <div><div class="txt" id="fTxt">CARD</div><div class="sub" id="fSub"></div></div></div>
+  <div class="toast" id="toast"></div>
+  <div id="stick"><div id="knob"></div></div>
+  <div class="abtn" id="bPass">PASS</div>
+  <div class="abtn" id="bShot">SHOOT</div>
+  <div class="abtn" id="bSprint">SPRINT</div>
+  <div class="hint">AI2ORBIT CO. 2026 - DEMO BUILD 2026-08-18<br>P TO PAUSE</div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ============================================================================================
+// AI2ORBIT Football AI - playable match - FROZEN DEMO BUILD, 18 August 2026
+// Copyright (c) AI2ORBIT Co. 2026
+//
+// THIS FILE DOES NOT CHANGE. play.html is where the work continues; this is a copy taken on
+// a day it was known good, so a demonstration in front of a customer cannot be broken by a
+// push made the same morning. It is updated only on request, never as a side effect.
+//
+// One file, no build step, no external asset and no third party licence: every player is made
+// from primitives. The rig and the gait are the prototype from runner.html, now driven by each
+// player's REAL velocity rather than a fixed number, which is the whole point - the legs are a
+// readout of the engine and not a loop playing beside it.
+// ============================================================================================
+
+const PITCH_X = 52.5, PITCH_Z = 34;          // half length, half width, in metres
+const GOAL_Z  = 3.66, GOAL_Y = 2.44;
+const HALF_SECONDS = 120;                    // per half; a demo match, not ninety minutes
+
+const clamp = (v,a,b) => v < a ? a : (v > b ? b : v);
+const lerp  = (a,b,t) => a + (b-a)*t;
+let rngState = 12345;
+function rnd(){ rngState = (rngState*1664525 + 1013904223) >>> 0; return rngState/4294967296; }
+
+// ============================================================================================
+// SCENE
+// ============================================================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070b);
+scene.fog = new THREE.Fog(0x05070b, 90, 190);
+
+const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, 0.3, 400);
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xc8ddff, 0x0a1a12, 0.95));
+const sun = new THREE.DirectionalLight(0xffffff, 1.35);
+sun.position.set(40, 70, 30);
+scene.add(sun);
+
+// The pitch. Stripes are separate planes rather than a texture so there is nothing to load.
+const grassA = new THREE.MeshStandardMaterial({color:0x1e7a36, roughness:0.97});
+const grassB = new THREE.MeshStandardMaterial({color:0x239140, roughness:0.97});
+for (let i = 0; i < 16; i++) {
+  const w = (PITCH_X*2+16)/16;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, PITCH_Z*2+14), i%2?grassA:grassB);
+  m.rotation.x = -Math.PI/2;
+  m.position.set(-PITCH_X-8 + w*(i+0.5), 0, 0);
+  scene.add(m);
+}
+const lineMat = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.62});
+function line(w,h,x,z,rot){
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), lineMat);
+  m.rotation.x = -Math.PI/2; if(rot) m.rotation.z = rot;
+  m.position.set(x, 0.012, z); scene.add(m); return m;
+}
+line(PITCH_X*2, 0.16, 0, -PITCH_Z); line(PITCH_X*2, 0.16, 0, PITCH_Z);
+line(0.16, PITCH_Z*2, -PITCH_X, 0); line(0.16, PITCH_Z*2, PITCH_X, 0);
+line(0.16, PITCH_Z*2, 0, 0);
+{
+  const ring = new THREE.Mesh(new THREE.RingGeometry(9.0, 9.16, 64), lineMat);
+  ring.rotation.x = -Math.PI/2; ring.position.y = 0.012; scene.add(ring);
+}
+for (const s of [-1, 1]) {                                   // penalty areas and six yard boxes
+  line(0.16, 40.3, s*(PITCH_X-16.5), 0);
+  line(16.5, 0.16, s*(PITCH_X-8.25), -20.15);
+  line(16.5, 0.16, s*(PITCH_X-8.25), 20.15);
+  line(0.16, 18.3, s*(PITCH_X-5.5), 0);
+  line(5.5, 0.16, s*(PITCH_X-2.75), -9.15);
+  line(5.5, 0.16, s*(PITCH_X-2.75), 9.15);
+}
+// Goals
+const postMat = new THREE.MeshStandardMaterial({color:0xf2f6ff, roughness:0.4});
+const netMat = new THREE.MeshBasicMaterial({color:0x9fc4ee, transparent:true, opacity:0.16,
+                                            side:THREE.DoubleSide});
+for (const s of [-1, 1]) {
+  for (const z of [-GOAL_Z, GOAL_Z]) {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,GOAL_Y,8), postMat);
+    p.position.set(s*PITCH_X, GOAL_Y/2, z); scene.add(p);
+  }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,GOAL_Z*2,8), postMat);
+  bar.rotation.x = Math.PI/2; bar.position.set(s*PITCH_X, GOAL_Y, 0); scene.add(bar);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(GOAL_Z*2, GOAL_Y), netMat);
+  back.position.set(s*(PITCH_X+1.9), GOAL_Y/2, 0); back.rotation.y = Math.PI/2; scene.add(back);
+  for (const z of [-GOAL_Z, GOAL_Z]) {
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(1.9, GOAL_Y), netMat);
+    side.position.set(s*(PITCH_X+0.95), GOAL_Y/2, z); scene.add(side);
+  }
+}
+// Stadium wall, so the horizon is not empty space
+{
+  const w = new THREE.Mesh(new THREE.BoxGeometry(PITCH_X*2+30, 7, 1),
+                           new THREE.MeshStandardMaterial({color:0x0a1220, roughness:1}));
+  for (const z of [-PITCH_Z-9, PITCH_Z+9]) { const c = w.clone(); c.position.set(0,3.5,z);
+                                             scene.add(c); }
+  const e = new THREE.Mesh(new THREE.BoxGeometry(1, 7, PITCH_Z*2+19),
+                           new THREE.MeshStandardMaterial({color:0x0a1220, roughness:1}));
+  for (const x of [-PITCH_X-14, PITCH_X+14]) { const c = e.clone(); c.position.set(x,3.5,0);
+                                               scene.add(c); }
+}
+
+// ============================================================================================
+// THE PLAYER RIG - the prototype, unchanged in principle
+// ============================================================================================
+const MATS = {
+  kitA:  new THREE.MeshStandardMaterial({color:0xc0243a, roughness:0.55}),
+  kitB:  new THREE.MeshStandardMaterial({color:0x1e50c8, roughness:0.55}),
+  kitGA: new THREE.MeshStandardMaterial({color:0xf59e0b, roughness:0.55}),
+  kitGB: new THREE.MeshStandardMaterial({color:0x14b8a6, roughness:0.55}),
+  shA:   new THREE.MeshStandardMaterial({color:0x6e0e1c, roughness:0.6}),
+  shB:   new THREE.MeshStandardMaterial({color:0x0e2a6e, roughness:0.6}),
+  skin:  new THREE.MeshStandardMaterial({color:0xd9a06a, roughness:0.78}),
+  sock:  new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.72}),
+  boot:  new THREE.MeshStandardMaterial({color:0x141414, roughness:0.5}),
+};
+// Geometry is shared between all 22 players. 286 meshes with 286 geometries would be an
+// avoidable cost on a phone; this way the GPU uploads each shape once.
+const GEO = {
+  hips:  new THREE.BoxGeometry(0.42, 0.22, 0.26),
+  torso: new THREE.BoxGeometry(0.46, 0.56, 0.28),
+  neck:  new THREE.CylinderGeometry(0.07, 0.08, 0.08, 6),
+  head:  new THREE.SphereGeometry(0.135, 12, 10),
+  boot:  new THREE.BoxGeometry(0.13, 0.07, 0.26),
+};
+function limbGeo(len, rTop, rBot){
+  const g = new THREE.CylinderGeometry(rTop, rBot, len, 7);
+  g.translate(0, -len/2, 0);            // the JOINT sits at the origin, the bone hangs below
+  return g;
+}
+GEO.upperArm = limbGeo(0.30, 0.062, 0.052);
+GEO.foreArm  = limbGeo(0.30, 0.052, 0.044);
+GEO.thigh    = limbGeo(0.42, 0.085, 0.068);
+GEO.shin     = limbGeo(0.40, 0.062, 0.048);
+
+const blobGeo = new THREE.CircleGeometry(0.42, 14);
+const blobMat = new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.3});
+
+function buildRig(kit, shorts){
+  const root = new THREE.Group();
+  const blob = new THREE.Mesh(blobGeo, blobMat);
+  blob.rotation.x = -Math.PI/2; blob.position.y = 0.015; root.add(blob);
+
+  const hips = new THREE.Mesh(GEO.hips, shorts); hips.position.y = 0.92; root.add(hips);
+  const chest = new THREE.Group(); chest.position.y = 0.11; hips.add(chest);
+  const torso = new THREE.Mesh(GEO.torso, kit); torso.position.y = 0.28; chest.add(torso);
+  const neck = new THREE.Mesh(GEO.neck, MATS.skin); neck.position.y = 0.60; chest.add(neck);
+  const head = new THREE.Mesh(GEO.head, MATS.skin); head.position.y = 0.73; chest.add(head);
+
+  const arms = [], legs = [];
+  for (const side of [-1, 1]) {
+    const sh = new THREE.Group(); sh.position.set(side*0.27, 0.5, 0); chest.add(sh);
+    sh.add(new THREE.Mesh(GEO.upperArm, kit));
+    const el = new THREE.Group(); el.position.y = -0.30; sh.add(el);
+    el.add(new THREE.Mesh(GEO.foreArm, MATS.skin));
+    arms.push({sh, el, side});
+
+    const hip = new THREE.Group(); hip.position.set(side*0.13, -0.10, 0); hips.add(hip);
+    hip.add(new THREE.Mesh(GEO.thigh, shorts));
+    const kn = new THREE.Group(); kn.position.y = -0.42; hip.add(kn);
+    kn.add(new THREE.Mesh(GEO.shin, MATS.sock));
+    const an = new THREE.Group(); an.position.y = -0.40; kn.add(an);
+    const bo = new THREE.Mesh(GEO.boot, MATS.boot); bo.position.set(0,-0.035,0.05); an.add(bo);
+    legs.push({hip, kn, an, side});
+  }
+  return {root, hips, chest, arms, legs, phase: rnd()*6.283};
+}
+
+// THE GAIT. Cadence and stride come from SPEED, so a player who slows down stops sprinting on
+// the spot. Everything here is a rotation about a joint; nothing is a position keyframe.
+function stride(rig, speed, dt, kicking, tackling){
+  const cadence = speed < 0.15 ? 0.55 : 1.05 + 0.62 * Math.pow(speed, 0.85);
+  rig.phase += cadence * dt * 6.283185;
+  const drive = clamp(speed/7.5, 0, 1);
+  const swing = 0.22 + 1.05*drive, lift = 0.15 + 1.35*drive;
+  rig.legs.forEach((L, i) => {
+    const ph = i === 0 ? rig.phase : rig.phase + Math.PI;
+    L.hip.rotation.x = Math.sin(ph)*swing - 0.06*drive;
+    // A knee bends ONE WAY. Clamping at zero is the single thing that stops a rig looking
+    // broken at a glance.
+    L.kn.rotation.x = -Math.max(0, Math.sin(ph - 0.9))*lift - 0.05;
+    L.an.rotation.x = 0.28*Math.max(0, Math.sin(ph + 0.4))*drive;
+  });
+  rig.arms.forEach((A, i) => {
+    const ph = i === 0 ? rig.phase + Math.PI : rig.phase;
+    A.sh.rotation.x = Math.sin(ph)*(0.20 + 0.85*drive);
+    A.sh.rotation.z = A.side*(0.10 + 0.16*drive);
+    A.el.rotation.x = -(0.25 + 0.95*drive) - 0.3*Math.max(0, Math.sin(ph));
+  });
+  rig.chest.rotation.x = 0.30*drive;
+  rig.hips.position.y = 0.92 + Math.abs(Math.cos(rig.phase))*0.045*drive;
+  if (speed < 0.15) { rig.hips.position.y = 0.92; rig.chest.rotation.x = 0.02; }
+  if (kicking > 0) {                                  // a kick overrides the right leg
+    const k = Math.sin(clamp(kicking, 0, 1)*Math.PI);
+    rig.legs[1].hip.rotation.x = -1.5*k;
+    rig.legs[1].kn.rotation.x  = -0.2 - 0.7*(1-k);
+    rig.chest.rotation.x = 0.30*drive - 0.25*k;
+  }
+  if (tackling > 0) {                                 // a slide: both legs out, body low
+    const t = Math.sin(clamp(tackling, 0, 1)*Math.PI);
+    rig.hips.position.y = 0.92 - 0.5*t;
+    rig.chest.rotation.x = 0.3 + 0.9*t;
+    rig.legs.forEach(L => { L.hip.rotation.x = -1.1*t; L.kn.rotation.x = -0.1; });
+  }
+}
+
+// ============================================================================================
+// THE MATCH
+// ============================================================================================
+const FORM = [   // 4-3-3 as fractions of half the pitch, from own goal outwards
+  [-0.92, 0.0], [-0.62,-0.55],[-0.66,-0.20],[-0.66, 0.20],[-0.62, 0.55],
+  [-0.22,-0.42],[-0.26, 0.0], [-0.22, 0.42],
+  [ 0.30,-0.62],[ 0.34, 0.0], [ 0.30, 0.62],
+];
+const NAMES = ['GK','LB','CB','CB','RB','CM','CM','CM','LW','ST','RW'];
+
+class Player {
+  constructor(team, idx){
+    this.team = team;                 // 0 = ATL (red, attacks +x), 1 = ORB (blue, attacks -x)
+    this.idx = idx;
+    this.gk = idx === 0;
+    const kit = this.gk ? (team ? MATS.kitGB : MATS.kitGA) : (team ? MATS.kitB : MATS.kitA);
+    this.rig = buildRig(kit, team ? MATS.shB : MATS.shA);
+    scene.add(this.rig.root);
+    this.pos = new THREE.Vector2(0,0);
+    this.vel = new THREE.Vector2(0,0);
+    this.face = team ? Math.PI : 0;
+    this.stamina = 1;
+    this.kick = 0; this.tackle = 0; this.cooldown = 0;
+    this.cards = 0;
+    this.off = false;
+    this.name = NAMES[idx];
+  }
+  get dir(){ return this.team ? -1 : 1; }        // which way this team attacks
+  homeFor(ballX){
+    const f = FORM[this.idx];
+    // The shape slides with the ball rather than standing still - what a team actually does.
+    const shift = clamp(ballX/PITCH_X, -1, 1) * (this.gk ? 3 : 16);
+    return new THREE.Vector2(
+      clamp(this.dir*(f[0]*PITCH_X) + shift, -PITCH_X+2, PITCH_X-2),
+      clamp(f[1]*PITCH_Z, -PITCH_Z+2, PITCH_Z-2));
+  }
+  get speedCap(){
+    const base = this.gk ? 6.2 : 7.2;
+    return base * (0.72 + 0.28*this.stamina);
+  }
+}
+
+const ball = {
+  pos: new THREE.Vector3(0, 0.11, 0),
+  vel: new THREE.Vector3(0, 0, 0),
+  owner: null,
+  lastTouch: null,
+  free: 0,
+};
+const prevBall = new THREE.Vector3(0, 0.11, 0);
+const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12),
+  new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.35}));
+scene.add(ballMesh);
+const ballShadow = new THREE.Mesh(new THREE.CircleGeometry(0.13, 12), blobMat);
+ballShadow.rotation.x = -Math.PI/2; scene.add(ballShadow);
+
+const teams = [[], []];
+for (let t = 0; t < 2; t++)
+  for (let i = 0; i < 11; i++) teams[t].push(new Player(t, i));
+const all = teams[0].concat(teams[1]);
+
+const G = {
+  running: false, paused: false, over: false,
+  half: 1, t: 0, score: [0,0], shots: [0,0],
+  cards: {g:0,y:0,r:0,b:0},
+  controlled: teams[1][9],          // the human takes ORB, the blue centre forward, at kick off
+  possession: null, posCount: [1,1],
+  refText: 'PLAY ON', refUntil: 0,
+  restart: 0, camMode: 0, fps: 0,
+  autoSwitch: true,   // off = manual switching only, with Q
+};
+
+function resetPositions(kickTeam){
+  for (const p of all) {
+    const h = p.homeFor(0);
+    p.pos.set(h.x, h.y);
+    // Nobody stands in the centre circle except the side kicking off.
+    if (p.team !== kickTeam && Math.hypot(p.pos.x, p.pos.y) < 9.2)
+      p.pos.x = p.dir * -9.5;
+    p.vel.set(0,0); p.kick = 0; p.tackle = 0; p.cooldown = 0.4;
+  }
+  const taker = teams[kickTeam][9];
+  taker.pos.set(-taker.dir*0.9, 0);
+  ball.pos.set(0, 0.11, 0); ball.vel.set(0,0,0);
+  ball.owner = taker; ball.free = 0;
+  G.controlled = teams[1][9];
+}
+
+// ---------------------------------------------------------------------------- input
+const keys = Object.create(null);
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyP' && G.running) { G.paused = !G.paused; toast(G.paused?'PAUSED':''); }
+  if (e.code === 'KeyC') G.camMode = (G.camMode + 1) % 2;
+  if (e.code === 'KeyQ') switchPlayer();
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
+    e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+const touch = {x:0, y:0, active:false, pass:false, shoot:false, sprint:false};
+const stick = document.getElementById('stick'), knob = document.getElementById('knob');
+if (matchMedia('(pointer: coarse)').matches) {
+  stick.style.display = 'block';
+  for (const id of ['bPass','bShot','bSprint']) document.getElementById(id).style.display='flex';
+}
+function stickFrom(ev){
+  const r = stick.getBoundingClientRect();
+  const t = ev.touches ? ev.touches[0] : ev;
+  let dx = (t.clientX - (r.left + r.width/2)) / (r.width/2);
+  let dy = (t.clientY - (r.top + r.height/2)) / (r.height/2);
+  const m = Math.hypot(dx, dy); if (m > 1) { dx /= m; dy /= m; }
+  touch.x = dx; touch.y = dy; touch.active = true;
+  knob.style.left = (35 + dx*35) + 'px'; knob.style.top = (35 + dy*35) + 'px';
+}
+stick.addEventListener('touchstart', e => { stickFrom(e); e.preventDefault(); }, {passive:false});
+stick.addEventListener('touchmove',  e => { stickFrom(e); e.preventDefault(); }, {passive:false});
+stick.addEventListener('touchend',   e => { touch.active=false; touch.x=touch.y=0;
+  knob.style.left='35px'; knob.style.top='35px'; e.preventDefault(); }, {passive:false});
+function hold(id, prop){
+  const el = document.getElementById(id);
+  el.addEventListener('touchstart', e => { touch[prop] = true; e.preventDefault(); },
+                      {passive:false});
+  el.addEventListener('touchend',   e => { touch[prop] = false; e.preventDefault(); },
+                      {passive:false});
+}
+hold('bPass','pass'); hold('bShot','shoot'); hold('bSprint','sprint');
+
+function inputVector(){
+  let x = 0, z = 0;
+  if (keys.KeyA || keys.ArrowLeft)  x -= 1;
+  if (keys.KeyD || keys.ArrowRight) x += 1;
+  if (keys.KeyW || keys.ArrowUp)    z -= 1;
+  if (keys.KeyS || keys.ArrowDown)  z += 1;
+  if (touch.active) { x += touch.x; z += touch.y; }
+  const m = Math.hypot(x, z);
+  return m > 1 ? {x:x/m, z:z/m, m:1} : {x, z, m};
+}
+
+function switchPlayer(){
+  const mine = teams[G.controlled.team].filter(p => !p.gk && !p.off && p !== G.controlled);
+  if (!mine.length) return;
+  mine.sort((a,b) => a.pos.distanceTo(v2(ball.pos)) - b.pos.distanceTo(v2(ball.pos)));
+  G.controlled = mine[0];
+}
+const v2 = v => new THREE.Vector2(v.x, v.z);
+
+// ---------------------------------------------------------------------------- ball actions
+function kickBall(p, dirX, dirZ, power, loft){
+  const m = Math.hypot(dirX, dirZ) || 1;
+  ball.owner = null; ball.free = 0.28;               // nobody may re-take it for a moment
+  ball.lastTouch = p;
+  ball.vel.set(dirX/m*power, loft, dirZ/m*power);
+  ball.pos.y = Math.max(ball.pos.y, 0.14);
+  p.kick = 1;
+}
+function bestPassTarget(p){
+  const mates = teams[p.team].filter(q => q !== p && !q.off);
+  let best = null, bestScore = -1e9;
+  for (const q of mates) {
+    const d = p.pos.distanceTo(q.pos);
+    if (d < 3 || d > 42) continue;
+    // Forward, open, and not through a crowd. Three terms, all cheap.
+    const forward = (q.pos.x - p.pos.x) * p.dir;
+    let blocked = 0;
+    for (const o of teams[1-p.team]) {
+      const t = clamp(((o.pos.x-p.pos.x)*(q.pos.x-p.pos.x) + (o.pos.y-p.pos.y)*(q.pos.y-p.pos.y))
+                      / (d*d), 0, 1);
+      const cx = p.pos.x + (q.pos.x-p.pos.x)*t, cz = p.pos.y + (q.pos.y-p.pos.y)*t;
+      if (Math.hypot(o.pos.x-cx, o.pos.y-cz) < 2.2) blocked += 1;
+    }
+    const space = Math.min(...teams[1-p.team].map(o => o.pos.distanceTo(q.pos)));
+    const s = forward*1.4 + space*2.2 - blocked*9 - d*0.25;
+    if (s > bestScore) { bestScore = s; best = q; }
+  }
+  return best;
+}
+function doPass(p){
+  if (ball.owner !== p || p.cooldown > 0) return;
+  const q = bestPassTarget(p);
+  if (!q) { kickBall(p, p.dir, 0, 14, 1.2); p.cooldown = 0.3; return; }
+  const d = p.pos.distanceTo(q.pos);
+  // Lead the receiver: aim where they will be, not where they are.
+  const ax = q.pos.x + q.vel.x*0.35 - p.pos.x, az = q.pos.y + q.vel.y*0.35 - p.pos.y;
+  kickBall(p, ax, az, clamp(d*1.05, 9, 26), d > 22 ? 2.6 : 0.5);
+  p.cooldown = 0.3;
+}
+function doShoot(p, power){
+  if (ball.owner !== p || p.cooldown > 0) return;
+  const gx = p.dir*PITCH_X, gz = clamp((rnd()-0.5)*5.4, -3.1, 3.1);
+  const d = Math.hypot(gx-p.pos.x, gz-p.pos.y);
+  const acc = clamp(1 - d/60, 0.25, 1);
+  const sx = gx - p.pos.x + (rnd()-0.5)*(1-acc)*16;
+  const sz = gz - p.pos.y + (rnd()-0.5)*(1-acc)*14;
+  kickBall(p, sx, sz, clamp(19 + power*11, 19, 31), clamp(d*0.07, 0.6, 3.4));
+  p.cooldown = 0.45;
+  G.shots[p.team]++;
+}
+function doTackle(p){
+  if (p.tackle > 0 || p.cooldown > 0) return;
+  p.tackle = 1; p.cooldown = 0.6;
+  const victim = ball.owner;
+  if (!victim || victim.team === p.team) return;
+  const d = p.pos.distanceTo(victim.pos);
+  if (d > 2.4) return;
+  const clean = rnd() < clamp(0.78 - d*0.18, 0.15, 0.8);
+  if (clean) { ball.owner = p; ball.lastTouch = p; ball.free = 0.12; setRef('TACKLE WON'); }
+  else foul(p, victim);
+}
+
+// ---------------------------------------------------------------------------- referee
+const CARD_COLOURS = {green:'#22c55e', yellow:'#eab308', red:'#dc2626', black:'#111111'};
+function foul(offender, victim){
+  const severity = rnd();
+  let card = 'green';
+  if (severity > 0.93) card = 'red';
+  else if (severity > 0.72) card = 'yellow';
+  if (offender.cards >= 1 && card === 'yellow') card = 'red';
+  offender.cards++;
+  G.cards[card[0]]++;
+  showCard(card);
+  setRef('FOUL - ' + card.toUpperCase());
+  if (card === 'red') { offender.off = true; offender.rig.root.visible = false; }
+  // Free kick to the side that was fouled: the ball is placed and given to the victim.
+  ball.owner = victim; ball.free = 0.5; ball.vel.set(0,0,0);
+  ball.pos.set(victim.pos.x, 0.11, victim.pos.y);
+  for (const p of all) p.cooldown = Math.max(p.cooldown, 0.5);
+}
+function showCard(kind){
+  const f = document.getElementById('flash');
+  document.getElementById('fCard').style.background = CARD_COLOURS[kind];
+  document.getElementById('fTxt').textContent = kind.toUpperCase() + ' CARD';
+  document.getElementById('fSub').textContent =
+    kind === 'green' ? 'CAUTION' : kind === 'yellow' ? 'BOOKED' :
+    kind === 'red' ? 'SENT OFF' : 'REPORTED';
+  f.style.display = 'flex';
+  clearTimeout(showCard._t);
+  showCard._t = setTimeout(() => { f.style.display = 'none'; }, 1600);
+}
+function setRef(t){ G.refText = t; G.refUntil = G.t + 2.5; }
+function toast(t){
+  const el = document.getElementById('toast');
+  el.textContent = t;
+  el.style.transition = 'none'; el.style.opacity = t ? '1' : '0';
+  if (t) { requestAnimationFrame(() => { el.style.transition = 'opacity 1.4s ease 0.7s';
+                                         el.style.opacity = '0'; }); }
+}
+
+// ---------------------------------------------------------------------------- AI
+function think(p, dt){
+  if (p.off) return {x:0, z:0, m:0};
+  const bp = v2(ball.pos);
+  const toBall = bp.clone().sub(p.pos);
+  const dBall = toBall.length();
+
+  if (p.gk) {                                    // keeper: stay on the line, come for it close
+    const gx = p.dir*(PITCH_X-1.2);
+    const tz = clamp(ball.pos.z*0.42, -GOAL_Z-1.2, GOAL_Z+1.2);
+    let tx = gx;
+    if (dBall < 12 && Math.abs(ball.pos.x - gx) < 13) tx = gx - p.dir*3.4;
+    const d = new THREE.Vector2(tx - p.pos.x, tz - p.pos.y);
+    return d.length() < 0.3 ? {x:0,z:0,m:0} : {x:d.x/d.length(), z:d.y/d.length(),
+                                               m:clamp(d.length()/3,0.25,1)};
+  }
+  if (ball.owner === p) {                        // on the ball: shoot, pass, or carry
+    const gx = p.dir*PITCH_X;
+    const dGoal = Math.hypot(gx-p.pos.x, p.pos.y);
+    if (dGoal < 26 && p.cooldown <= 0 && rnd() < 0.05) { doShoot(p, rnd()); }
+    else if (p.cooldown <= 0 && rnd() < 0.045) { doPass(p); }
+    const tz = clamp(p.pos.y*0.6, -PITCH_Z+4, PITCH_Z-4);
+    const d = new THREE.Vector2(gx - p.pos.x, tz - p.pos.y);
+    return {x:d.x/d.length(), z:d.y/d.length(), m:1};
+  }
+  const mine = ball.owner && ball.owner.team === p.team;
+  // Exactly one outfielder presses. Everyone chasing is how a toy football game looks.
+  const nearest = teams[p.team].filter(q => !q.gk && !q.off)
+    .sort((a,b) => a.pos.distanceTo(bp) - b.pos.distanceTo(bp))[0];
+  if (!mine && p === nearest) {
+    const d = toBall.clone();
+    return {x:d.x/dBall, z:d.y/dBall, m:1};
+  }
+  const home = p.homeFor(ball.pos.x);
+  if (mine) {                                     // in possession: push up and spread
+    home.x += p.dir*5.5;
+    if (p.idx >= 8) home.x += p.dir*4.5;
+  }
+  const d = home.clone().sub(p.pos);
+  const len = d.length();
+  return len < 1.2 ? {x:0,z:0,m:0}
+                   : {x:d.x/len, z:d.y/len, m:clamp(len/8, 0.28, 0.95)};
+}
+
+// ---------------------------------------------------------------------------- step
+let shootHeld = 0;
+function step(dt){
+  G.t += dt;
+
+  for (const p of all) {
+    if (p.cooldown > 0) p.cooldown -= dt;
+    if (p.kick > 0)   p.kick   = Math.max(0, p.kick - dt*3.4);
+    if (p.tackle > 0) p.tackle = Math.max(0, p.tackle - dt*1.6);
+
+    let want, sprint = false;
+    if (p === G.controlled && !p.off) {
+      const iv = inputVector();
+      want = iv;
+      sprint = !!(keys.ShiftLeft || keys.ShiftRight || touch.sprint);
+      if (keys.Space || touch.pass) { doPass(p); keys.Space = false; touch.pass = false; }
+      if (keys.KeyJ || touch.shoot) shootHeld = Math.min(1, shootHeld + dt*1.6);
+      else if (shootHeld > 0) { doShoot(p, shootHeld); shootHeld = 0; }
+      if (keys.KeyK) { doTackle(p); keys.KeyK = false; }
+    } else {
+      want = think(p, dt);
+      sprint = want.m > 0.9 && p.stamina > 0.3;
+    }
+
+    const cap = p.speedCap * (sprint ? 1.25 : 1) * (p.tackle > 0 ? 0.4 : 1);
+    p.stamina = clamp(p.stamina + (sprint ? -dt*0.055 : dt*0.035), 0.15, 1);
+    const desX = want.x * cap * (want.m || 0), desZ = want.z * cap * (want.m || 0);
+    const accel = 14 * dt;
+    p.vel.x += clamp(desX - p.vel.x, -accel, accel);
+    p.vel.y += clamp(desZ - p.vel.y, -accel, accel);
+    p.vel.multiplyScalar(1 - 2.4*dt*(want.m ? 0.15 : 1));
+    p.pos.x = clamp(p.pos.x + p.vel.x*dt, -PITCH_X-2, PITCH_X+2);
+    p.pos.y = clamp(p.pos.y + p.vel.y*dt, -PITCH_Z-1, PITCH_Z+1);
+    const sp = p.vel.length();
+    if (sp > 0.35) p.face = Math.atan2(p.vel.x, p.vel.y);
+    p.rig.root.position.set(p.pos.x, 0, p.pos.y);
+    p.rig.root.rotation.y = p.face;
+    stride(p.rig, sp, dt, p.kick, p.tackle);
+  }
+
+  // players do not stand inside each other
+  for (let i = 0; i < all.length; i++)
+    for (let j = i+1; j < all.length; j++) {
+      const a = all[i], b = all[j];
+      if (a.off || b.off) continue;
+      const dx = b.pos.x-a.pos.x, dz = b.pos.y-a.pos.y;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.001 && d < 0.72) {
+        const push = (0.72-d)/2;
+        a.pos.x -= dx/d*push; a.pos.y -= dz/d*push;
+        b.pos.x += dx/d*push; b.pos.y += dz/d*push;
+      }
+    }
+
+  // ---- ball
+  prevBall.copy(ball.pos);
+  if (ball.free > 0) ball.free -= dt;
+  if (ball.owner) {
+    const o = ball.owner;
+    const fx = Math.sin(o.face), fz = Math.cos(o.face);
+    ball.pos.set(o.pos.x + fx*0.55, 0.11 + Math.abs(Math.sin(o.rig.phase))*0.05,
+                 o.pos.y + fz*0.55);
+    ball.vel.set(o.vel.x, 0, o.vel.y);
+  } else {
+    ball.vel.y -= 16.5*dt;
+    ball.pos.addScaledVector(ball.vel, dt);
+    if (ball.pos.y <= 0.11) {
+      ball.pos.y = 0.11;
+      if (ball.vel.y < 0) ball.vel.y = -ball.vel.y*0.42;
+      if (Math.abs(ball.vel.y) < 0.6) ball.vel.y = 0;
+      ball.vel.x *= 1 - 1.05*dt; ball.vel.z *= 1 - 1.05*dt;
+    }
+    if (ball.free <= 0) {                          // who wins it
+      let best = null, bd = 1e9;
+      for (const p of all) {
+        if (p.off) continue;
+        const d = Math.hypot(p.pos.x-ball.pos.x, p.pos.y-ball.pos.z);
+        if (d < 1.15 && ball.pos.y < 1.0 && d < bd) { bd = d; best = p; }
+      }
+      if (best) { ball.owner = best; ball.lastTouch = best; }
+    }
+    // out of play: throw in / goal kick, kept simple and always resolvable
+    if (Math.abs(ball.pos.z) > PITCH_Z) {
+      ball.pos.z = Math.sign(ball.pos.z)*(PITCH_Z-0.4); ball.vel.set(0,0,0);
+      const side = ball.lastTouch ? 1-ball.lastTouch.team : 0;
+      const taker = teams[side].filter(p=>!p.gk&&!p.off)
+        .sort((a,b)=>a.pos.distanceTo(v2(ball.pos))-b.pos.distanceTo(v2(ball.pos)))[0];
+      if (taker) { ball.owner = taker; ball.free = 0.3;
+                   taker.pos.set(ball.pos.x, ball.pos.z); }
+      setRef('THROW IN');
+    }
+  }
+
+  // ---- the goal line
+  //
+  // THE FIRST VERSION OF THIS TESTED THE BALL'S POSITION ONCE A FRAME. At 31 m/s the ball
+  // travels half a metre between frames, so whether a shot was a goal depended on where the
+  // sampling happened to land - and a ball that clipped the frame passed straight through it.
+  // Now the crossing point is worked out by interpolating between the previous position and
+  // this one, so the answer does not depend on the frame rate, and the posts and the bar are
+  // solid.
+  for (const s of [-1, 1]) {
+    const planeX = s*PITCH_X;
+    const wasBefore = (prevBall.x - planeX)*s < 0;
+    const isAfter   = (ball.pos.x - planeX)*s >= 0;
+    if (!(wasBefore && isAfter)) continue;
+    const dx = ball.pos.x - prevBall.x;
+    const t = Math.abs(dx) < 1e-6 ? 0 : (planeX - prevBall.x)/dx;
+    const zc = prevBall.z + (ball.pos.z - prevBall.z)*t;
+    const yc = prevBall.y + (ball.pos.y - prevBall.y)*t;
+    if (Math.abs(zc) < GOAL_Z && yc < GOAL_Y) {
+      const scorer = s > 0 ? 0 : 1;                // team 0 attacks +x
+      G.score[scorer]++;
+      toast('GOAL'); setRef('GOAL');
+      resetPositions(1-scorer);
+      return;
+    }
+    // Inside the woodwork rather than through it. A post is 0.09 m of round steel; anything
+    // whose centre passes within a ball's radius of it comes back out.
+    const hitPost = Math.abs(Math.abs(zc) - GOAL_Z) < 0.20 && yc < GOAL_Y + 0.20;
+    const hitBar  = Math.abs(zc) < GOAL_Z + 0.20 && Math.abs(yc - GOAL_Y) < 0.20;
+    if (hitPost || hitBar) {
+      ball.pos.set(planeX - s*0.16, Math.max(0.11, yc), zc);
+      if (hitBar) { ball.vel.y = -Math.abs(ball.vel.y) - 1.5; ball.vel.x *= -0.35; }
+      else        { ball.vel.z = -ball.vel.z*0.6; ball.vel.x *= -0.5; }
+      ball.free = 0.15;
+      setRef(hitBar ? 'OFF THE BAR' : 'OFF THE POST');
+      toast(hitBar ? 'OFF THE BAR' : 'OFF THE POST');
+    }
+  }
+  if (Math.abs(ball.pos.x) > PITCH_X + 1.5) {      // behind, not in: goal kick
+    const side = ball.pos.x > 0 ? 1 : 0;
+    const gk = teams[side][0];
+    ball.owner = gk; ball.free = 0.4; ball.vel.set(0,0,0);
+    ball.pos.set(gk.pos.x, 0.11, gk.pos.y);
+    setRef('GOAL KICK');
+  }
+
+  // possession statistics
+  if (ball.owner) { G.posCount[ball.owner.team] += dt; G.possession = ball.owner.team; }
+
+  // automatic switch: the human always holds the most useful player
+  if (G.autoSwitch && !G.controlled.off) {
+    const holderIsMine = ball.owner && ball.owner.team === G.controlled.team;
+    if (holderIsMine && ball.owner !== G.controlled && !ball.owner.gk) G.controlled = ball.owner;
+    else if (!holderIsMine) {
+      const bp = v2(ball.pos);
+      const near = teams[G.controlled.team].filter(p=>!p.gk&&!p.off)
+        .sort((a,b)=>a.pos.distanceTo(bp)-b.pos.distanceTo(bp))[0];
+      if (near && near.pos.distanceTo(bp) + 6 < G.controlled.pos.distanceTo(bp))
+        G.controlled = near;
+    }
+  } else if (G.controlled.off) switchPlayer();
+
+  // half and full time
+  if (G.t >= HALF_SECONDS * G.half) {
+    if (G.half === 1) { G.half = 2; toast('HALF TIME'); resetPositions(0); }
+    else finish();
+  }
+}
+
+function finish(){
+  G.running = false; G.over = true;
+  const [a, b] = G.score;
+  document.getElementById('endTitle').textContent = 'FULL TIME';
+  document.getElementById('endScore').textContent = 'ATL ' + a + ' - ' + b + ' ORB';
+  document.getElementById('endLine').textContent =
+    b > a ? 'You won. Shots ' + G.shots[1] + ' to ' + G.shots[0] + '.'
+          : a > b ? 'You lost. Shots ' + G.shots[1] + ' to ' + G.shots[0] + '.'
+                  : 'A draw. Shots ' + G.shots[1] + ' to ' + G.shots[0] + '.';
+  document.getElementById('end').style.display = 'flex';
+}
+
+// ---------------------------------------------------------------------------- camera + HUD
+const camPos = new THREE.Vector3(0, 30, 46), camAim = new THREE.Vector3(0,0,0);
+function updateCamera(dt){
+  const c = G.controlled;
+  const aimX = ball.pos.x*0.62 + c.pos.x*0.38;
+  const aimZ = ball.pos.z*0.62 + c.pos.y*0.38;
+  // Two cameras, and both are offset along ONE axis only. An earlier version offset along
+  // both at once, which rotated the pitch across the screen and made it hard to tell which
+  // way anybody was attacking.
+  let want, look;
+  if (G.camMode === 0) {                     // behind the attack, looking at the target goal
+    want = new THREE.Vector3(aimX - c.dir*27, 15, aimZ*0.55);
+    look = new THREE.Vector3(aimX + c.dir*9, 1.0, aimZ*0.55);
+  } else {                                   // broadcast, from the touchline
+    want = new THREE.Vector3(aimX*0.55, 38, 62);
+    look = new THREE.Vector3(aimX*0.55, 0, 2);
+  }
+  camPos.lerp(want, clamp(dt*2.4, 0, 1));
+  camAim.lerp(look, clamp(dt*3.4, 0, 1));
+  camera.position.copy(camPos);
+  camera.lookAt(camAim);
+}
+const el = id => document.getElementById(id);
+let hudT = 0;
+function updateHUD(dt){
+  hudT += dt; if (hudT < 0.1) return; hudT = 0;
+  el('score').textContent = G.score[0] + ' - ' + G.score[1];
+  const s = Math.floor(G.t);
+  el('clock').textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' +
+                            String(s%60).padStart(2,'0');
+  el('cG').textContent = G.cards.g; el('cY').textContent = G.cards.y;
+  el('cR').textContent = G.cards.r; el('cB').textContent = G.cards.b;
+  const tot = G.posCount[0] + G.posCount[1];
+  el('tPos').textContent = Math.round(G.posCount[1]/tot*100) + '%';
+  el('tSh').textContent = G.shots[0] + ' - ' + G.shots[1];
+  el('tBall').textContent = ball.vel.length().toFixed(1);
+  el('tFps').textContent = G.fps ? G.fps.toFixed(0) : '--';
+  const c = G.controlled;
+  const gx = c.dir*PITCH_X;
+  const dGoal = Math.hypot(gx-c.pos.x, c.pos.y);
+  const gp = ball.owner === c ? clamp(Math.round((1 - dGoal/60)*70), 2, 70) : 4;
+  el('pGoal').textContent = gp + '%'; el('bGoal').style.width = gp + '%';
+  el('pWho').textContent = c.name + ' ' + (c.idx+1);
+  el('bSta').style.width = Math.round(c.stamina*100) + '%';
+  el('pRef').textContent = G.t < G.refUntil ? G.refText : 'PLAY ON';
+}
+
+// a ring under the player the human is holding, so it is never a guess which one that is
+const marker = new THREE.Mesh(new THREE.RingGeometry(0.52, 0.68, 22),
+  new THREE.MeshBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.95,
+                               side:THREE.DoubleSide}));
+marker.rotation.x = -Math.PI/2; marker.position.y = 0.03; scene.add(marker);
+
+// ---------------------------------------------------------------------------- loop
+let last = performance.now(), acc = 0, frames = 0, fpsT = 0;
+function frame(now){
+  requestAnimationFrame(frame);
+  let dt = (now - last)/1000; last = now;
+  if (dt > 0.1) dt = 0.1;                     // a tab that was in the background does not warp
+  frames++; fpsT += dt;
+  if (fpsT >= 0.5) { G.fps = frames/fpsT; frames = 0; fpsT = 0; }
+
+  if (G.running && !G.paused) {
+    // A FIXED step, so the match plays the same on a 60 Hz laptop and a 120 Hz phone.
+    acc += dt;
+    let guard = 0;
+    while (acc >= 1/60 && guard++ < 6) { step(1/60); acc -= 1/60; }
+  }
+  marker.position.set(G.controlled.pos.x, 0.03, G.controlled.pos.y);
+  marker.visible = G.running && !G.controlled.off;
+  ballMesh.position.copy(ball.pos);
+  ballMesh.rotation.x += ball.vel.z*0.06; ballMesh.rotation.z -= ball.vel.x*0.06;
+  ballShadow.position.set(ball.pos.x, 0.02, ball.pos.z);
+  const sc = clamp(1 - (ball.pos.y-0.11)*0.1, 0.35, 1);
+  ballShadow.scale.set(sc, sc, sc);
+  updateCamera(dt);
+  updateHUD(dt);
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+
+function startMatch(){
+  G.running = true; G.paused = false; G.over = false;
+  G.half = 1; G.t = 0; G.score = [0,0]; G.shots = [0,0];
+  G.cards = {g:0,y:0,r:0,b:0}; G.posCount = [1,1];
+  for (const p of all) { p.off = false; p.cards = 0; p.stamina = 1;
+                         p.rig.root.visible = true; }
+  resetPositions(0);
+  document.getElementById('start').style.display = 'none';
+  document.getElementById('end').style.display = 'none';
+  toast('KICK OFF');
+}
+document.getElementById('go').onclick = startMatch;
+document.getElementById('again').onclick = startMatch;
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+resetPositions(0);
+
+// A deliberate, documented test hook. Everything an automated check needs to assert on is
+// here, so a check can measure the game rather than guess at pixels.
+window.__game = {
+  G, ball, teams, all,
+  start: startMatch,
+  state: () => ({running:G.running, half:G.half, t:G.t, score:G.score.slice(),
+                 shots:G.shots.slice(), fps:G.fps, cards:{...G.cards},
+                 controlled:{name:G.controlled.name, team:G.controlled.team,
+                             x:G.controlled.pos.x, z:G.controlled.pos.y},
+                 ball:{x:ball.pos.x, y:ball.pos.y, z:ball.pos.z,
+                       vx:ball.vel.x, vy:ball.vel.y, vz:ball.vel.z,
+                       owner:ball.owner ? ball.owner.name : null,
+                       ownerTeam:ball.owner ? ball.owner.team : null}}),
+  setBall: (x,z,vx,vz,vy) => { ball.owner = null; ball.free = 0.3;
+                               ball.pos.set(x, 0.11, z);
+                               ball.vel.set(vx||0, vy||0, vz||0); },
+  giveBall: (team, idx) => { ball.owner = teams[team][idx]; ball.free = 0; },
+  legAngles: () => G.controlled.rig.legs.map(L => +L.hip.rotation.x.toFixed(4)),
+  // Runs the gait alone at a fixed speed on a scratch rig and reports how far the hip swings.
+  // This is the claim "cadence and stride come from the speed" reduced to one number.
+  gaitProbe: (speed, frames) => {
+    const rig = buildRig(MATS.kitA, MATS.shA);
+    rig.root.visible = false;
+    let lo = 9, hi = -9;
+    for (let i = 0; i < (frames || 240); i++) {
+      stride(rig, speed, 1/60, 0, 0);
+      lo = Math.min(lo, rig.legs[0].hip.rotation.x);
+      hi = Math.max(hi, rig.legs[0].hip.rotation.x);
+    }
+    return +(hi - lo).toFixed(4);
+  },
+  advance: (seconds) => { const n = Math.round(seconds*60);
+                          for (let i=0;i<n;i++) step(1/60); },
+  // Freezes the automatic switch so a check can measure ONE player across several seconds.
+  // An earlier version of the movement check did not do this and measured the displacement
+  // between two DIFFERENT players, which reads as the controls being wired backwards.
+  lockControl: (on) => { G.autoSwitch = !on; },
+};
+</script>
+</body>
+</html>
