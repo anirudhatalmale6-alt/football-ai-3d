@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI2ORBIT Football AI - articulated runner prototype</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;600&display=swap');
+  html,body{margin:0;height:100%;background:#080b10;overflow:hidden;
+            font-family:Rajdhani,system-ui,sans-serif;color:#cfe3ff}
+  canvas{display:block}
+  .hud{position:fixed;left:18px;top:14px;font-family:Orbitron,sans-serif;letter-spacing:1px}
+  .hud h1{margin:0;font-size:15px;font-weight:900;color:#fff}
+  .hud .s{font-size:10px;color:#7aa7d8;letter-spacing:2px;margin-top:3px}
+  .note{position:fixed;left:18px;bottom:14px;font-size:12px;color:#8fb2d8;max-width:900px;
+        line-height:1.5}
+  .note b{color:#dbe9ff}
+  .tag{position:fixed;right:18px;top:14px;font-family:Orbitron,sans-serif;font-size:10px;
+       color:#4d7db0;letter-spacing:2px}
+</style>
+</head>
+<body>
+<div class="hud"><h1>ARTICULATED RUNNER &mdash; PROTOTYPE</h1>
+  <div class="s">GAIT DRIVEN BY THE SPEED THE ENGINE REPORTS</div></div>
+<div class="tag">AI2ORBIT CO. 2026</div>
+<div class="note">
+  Left figure is what the slice ships today. The rest are the same player with a skeleton, at
+  <b>2, 4, 6 and 8 m/s</b>. Stride length and cadence come from the speed itself, so a player
+  who slows down does not keep sprinting on the spot &mdash; the legs are a readout of the AI,
+  not a loop playing beside it. No external model, no animation file and no licence: every
+  part is a primitive.
+</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080b10);
+scene.fog = new THREE.Fog(0x080b10, 26, 62);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(4.0, 1.62, 10.6);
+camera.lookAt(-0.5, 1.02, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x0b1a12, 0.75));
+const key = new THREE.DirectionalLight(0xffffff, 1.5);
+key.position.set(7, 14, 8);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -18; key.shadow.camera.right = 18;
+key.shadow.camera.top = 18;  key.shadow.camera.bottom = -18;
+scene.add(key);
+
+// the pitch, striped the way the slice stripes it
+const pitch = new THREE.Group();
+for (let i = -8; i < 8; i++) {
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.6, 40),
+    new THREE.MeshStandardMaterial({color: i % 2 ? 0x1f7a37 : 0x24913f, roughness: 0.95}));
+  m.rotation.x = -Math.PI/2; m.position.set(i*2.6 + 1.3, 0, 0);
+  m.receiveShadow = true; pitch.add(m);
+}
+scene.add(pitch);
+
+const KIT   = new THREE.MeshStandardMaterial({color: 0x1e50c8, roughness: 0.55});
+const SHORTS= new THREE.MeshStandardMaterial({color: 0x0e2a6e, roughness: 0.6});
+const SKIN  = new THREE.MeshStandardMaterial({color: 0xd9a06a, roughness: 0.75});
+const SOCK  = new THREE.MeshStandardMaterial({color: 0xffffff, roughness: 0.7});
+const BOOT  = new THREE.MeshStandardMaterial({color: 0x141414, roughness: 0.5});
+
+function limb(len, rTop, rBot, mat){
+  // Geometry is translated so the JOINT is at the origin and the limb hangs below it. That is
+  // the whole trick: rotating the group then rotates about the hip or the knee, which is what
+  // a joint is, rather than about the middle of the bone.
+  const g = new THREE.CylinderGeometry(rTop, rBot, len, 10);
+  g.translate(0, -len/2, 0);
+  const m = new THREE.Mesh(g, mat);
+  m.castShadow = true;
+  return m;
+}
+
+function makePlayer(){
+  const p = new THREE.Group();
+
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.26), SHORTS);
+  hips.position.y = 0.92; hips.castShadow = true; p.add(hips);
+
+  const chest = new THREE.Group(); chest.position.y = 0.11; hips.add(chest);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.56, 0.28), KIT);
+  torso.position.y = 0.28; torso.castShadow = true; chest.add(torso);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.08,0.08,8), SKIN);
+  neck.position.y = 0.60; chest.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.135, 16, 14), SKIN);
+  head.position.y = 0.73; head.castShadow = true; chest.add(head);
+
+  const arms = [], legs = [];
+  for (const side of [-1, 1]) {
+    const sh = new THREE.Group();
+    sh.position.set(side*0.27, 0.5, 0); chest.add(sh);
+    const up = limb(0.30, 0.062, 0.052, KIT); sh.add(up);
+    const el = new THREE.Group(); el.position.y = -0.30; sh.add(el);
+    const fo = limb(0.30, 0.052, 0.044, SKIN); el.add(fo);
+    arms.push({sh, el, side});
+
+    const hip = new THREE.Group();
+    hip.position.set(side*0.13, -0.10, 0); hips.add(hip);
+    const th = limb(0.42, 0.085, 0.068, SHORTS); hip.add(th);
+    const kn = new THREE.Group(); kn.position.y = -0.42; hip.add(kn);
+    const sh2 = limb(0.40, 0.062, 0.048, SOCK); kn.add(sh2);
+    const an = new THREE.Group(); an.position.y = -0.40; kn.add(an);
+    const bo = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.07, 0.26), BOOT);
+    bo.position.set(0, -0.035, 0.05); bo.castShadow = true; an.add(bo);
+    legs.push({hip, kn, an, side});
+  }
+  p.userData = {hips, chest, arms, legs, phase: Math.random()*Math.PI*2};
+  return p;
+}
+
+// A capsule, exactly as the slice draws one today, for the comparison.
+function makeCapsule(){
+  const g = new THREE.Group();
+  const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.55, 6, 14),
+                           new THREE.MeshStandardMaterial({color:0xc02434, roughness:0.6}));
+  b.position.y = 0.72; b.castShadow = true; g.add(b);
+  const h = new THREE.Mesh(new THREE.SphereGeometry(0.15,14,12), SKIN);
+  h.position.y = 1.22; h.castShadow = true; g.add(h);
+  return g;
+}
+
+// THE GAIT. Everything below is a function of SPEED and nothing is a function of wall clock
+// time on its own, so the animation cannot drift away from what the player is actually doing.
+function stride(p, speed, dt){
+  const u = p.userData;
+  // Cadence rises with speed but not linearly - a sprinter takes longer strides as well as
+  // faster ones, which is why the exponent is below one.
+  const cadence = speed < 0.05 ? 0.55 : 1.05 + 0.62 * Math.pow(speed, 0.85);
+  u.phase += cadence * dt * Math.PI * 2;
+  const s = Math.sin(u.phase), c = Math.cos(u.phase);
+
+  const drive = Math.min(1, speed / 7.5);              // 0 standing, 1 flat out
+  const swing = 0.22 + 1.05 * drive;                   // radians of thigh swing
+  const lift  = 0.15 + 1.35 * drive;                   // how far the heel comes up
+
+  u.legs.forEach((L, i) => {
+    const ph = i === 0 ? u.phase : u.phase + Math.PI;   // the two legs are half a cycle apart
+    const sp = Math.sin(ph);
+    L.hip.rotation.x = sp * swing - 0.06 * drive;
+    // A knee bends one way only. Clamping at zero is what stops the shin folding forwards,
+    // which is the single thing that makes a rig look wrong at a glance.
+    L.kn.rotation.x = -Math.max(0, Math.sin(ph - 0.9)) * lift - 0.05;
+    L.an.rotation.x = 0.28 * Math.max(0, Math.sin(ph + 0.4)) * drive;
+  });
+  u.arms.forEach((A, i) => {
+    const ph = i === 0 ? u.phase + Math.PI : u.phase;   // arms oppose the legs
+    A.sh.rotation.x = Math.sin(ph) * (0.20 + 0.85 * drive);
+    A.sh.rotation.z = A.side * (0.10 + 0.16 * drive);
+    A.el.rotation.x = -(0.25 + 0.95 * drive) - 0.3 * Math.max(0, Math.sin(ph));
+  });
+  // Lean into the run, and bob twice per stride - the body rises on each push off.
+  u.chest.rotation.x = 0.30 * drive;
+  u.hips.position.y  = 0.92 + Math.abs(c) * 0.045 * drive;
+  if (speed < 0.05) {                                  // idle: a small sway, not a freeze
+    u.hips.position.y = 0.92 + Math.sin(u.phase*0.6) * 0.008;
+    u.chest.rotation.x = 0.02;
+  }
+}
+
+const SPEEDS = [2, 4, 6, 8];
+const players = [];
+const cap = makeCapsule();
+cap.position.set(-6.2, 0, 0);
+scene.add(cap);
+
+SPEEDS.forEach((sp, i) => {
+  const p = makePlayer();
+  p.position.set(-2.6 + i*2.6, 0, 0);
+  scene.add(p);
+  players.push({p, speed: sp});
+});
+
+// labels on the pitch, so the picture explains itself without the page around it
+function label(text, x, colour){
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = colour; g.font = '700 62px Orbitron, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 256, 64);
+  const t = new THREE.CanvasTexture(cv);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.375),
+                           new THREE.MeshBasicMaterial({map:t, transparent:true,
+                                                        depthWrite:false}));
+  m.position.set(x, 2.05, 0);
+  m.lookAt(camera.position);
+  scene.add(m);
+}
+label('TODAY', -6.2, '#ff8a8a');
+SPEEDS.forEach((sp, i) => label(sp + ' M/S', -2.6 + i*2.6, '#bcd8ff'));
+
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now - last)/1000);
+  last = now;
+  players.forEach(({p, speed}) => stride(p, speed, dt));
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
