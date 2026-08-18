@@ -76,6 +76,22 @@
            height:64px;font-size:10px}
   .hint{position:absolute;right:14px;bottom:12px;font-size:11px;color:#5d80ab;text-align:right;
         font-family:Orbitron,sans-serif;letter-spacing:1px;line-height:1.7}
+  /* A phone is 390 points wide. At that width the scoreboard, the telemetry and the three
+     panels all wanted the same space, and the panels sat underneath the touch controls where
+     a thumb covers them. On a narrow screen everything informative moves to the TOP and the
+     bottom third is left entirely to the hands. */
+  @media (max-width: 620px) {
+    .sb div{padding:5px 8px;font-size:12px}
+    .cards{top:40px;padding:4px 7px;font-size:10px;gap:5px}
+    .tele{padding:5px 8px;font-size:9px;min-width:118px;right:8px}
+    .tele .row{margin:1px 0;gap:8px}
+    .tele .row b{font-size:11px}
+    .bot{top:78px;left:8px;bottom:auto;gap:5px;max-width:62vw}
+    .pan{padding:4px 8px;font-size:8px}
+    .pan b{font-size:12px}
+    .bar{width:64px;height:3px;margin-top:3px}
+    .hint{display:none}
+  }
 </style>
 </head>
 <body>
