@@ -101,7 +101,10 @@
   <h2>FOOTBALL AI &mdash; PLAYABLE</h2>
   <p>Ten outfield players a side plus keepers, all articulated, all driven by the engine.
      You control the highlighted player; the switch is automatic when possession changes.
-     Referee AI is live: fouls are called and cards are shown.</p>
+     Referee AI is live and now plays the Laws: offside with the flag decision, throw ins,
+     corners, goal kicks, free kicks with a wall, penalties, advantage and dropped balls.
+     The rules are a separate module with no renderer in it, so they survive a change of
+     engine.</p>
   <div class="keys">
     <b>MOVE</b><span>W A S D &nbsp;or&nbsp; arrow keys</span>
     <b>PASS</b><span>SPACE &mdash; to the best open team-mate</span>
@@ -111,6 +114,7 @@
     <b>SWITCH</b><span>Q &mdash; take the next nearest player</span>
     <b>CAMERA</b><span>C &mdash; follow or broadcast</span>
     <b>PAUSE</b><span>P</span>
+    <b>ATTRACT</b><span>T &mdash; the engine plays both sides</span>
   </div>
   <button class="btn" id="go">KICK OFF</button>
 </div>
@@ -140,6 +144,8 @@
     <div class="row"><span>SHOTS</span><b id="tSh">0 - 0</b></div>
     <div class="row"><span>BALL SPEED</span><b id="tBall">0.0</b></div>
     <div class="row"><span>FPS</span><b id="tFps">--</b></div>
+    <div class="row"><span>RESTARTS</span><b id="tRes">--</b></div>
+    <div class="row"><span>OFFSIDE</span><b id="tOff">0</b></div>
   </div>
   <div class="bot">
     <div class="pan">GOAL PROBABILITY<b id="pGoal">0%</b><span class="bar"><i id="bGoal" style="width:0"></i></span></div>
@@ -161,15 +167,22 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
+import * as LAW from './laws.js';
 
 // ============================================================================================
 // AI2ORBIT Football AI - playable match
 // Copyright (c) AI2ORBIT Co. 2026
 //
-// One file, no build step, no external asset and no third party licence: every player is made
-// from primitives. The rig and the gait are the prototype from runner.html, now driven by each
+// No build step, no external asset and no third party licence: every player is made from
+// primitives. The rig and the gait are the prototype from runner.html, now driven by each
 // player's REAL velocity rather than a fixed number, which is the whole point - the legs are a
 // readout of the engine and not a loop playing beside it.
+//
+// THE RULES ARE NOT IN THIS FILE. They are in laws.js, which imports nothing, touches no
+// renderer and is tested under node with no browser present. This file is the thing that gets
+// thrown away if the project moves to another engine; laws.js is the thing that does not. So
+// every referee decision below is a CALL into that module and never a comparison written here.
+// Where this file does arithmetic on the Laws, that is a defect waiting to be moved.
 // ============================================================================================
 
 const PITCH_X = 52.5, PITCH_Z = 34;          // half length, half width, in metres
@@ -390,7 +403,14 @@ class Player {
     this.cards = 0;
     this.off = false;
     this.name = NAMES[idx];
+    // A stable identity, because the rules layer is handed plain objects and must be able to
+    // say WHICH player it flagged without holding a reference to anything graphical.
+    this.uid = team * 100 + idx;
+    this.holding = 0;                 // seconds this keeper has had the ball in the hands
   }
+  // The plain description the rules layer works on: an id, a position, and whether the player
+  // is still on the field. No mesh, no velocity, no team colour.
+  pt(){ return { id: this.uid, x: this.pos.x, z: this.pos.y, on: !this.off }; }
   get dir(){ return this.team ? -1 : 1; }        // which way this team attacks
   homeFor(ballX){
     const f = FORM[this.idx];
@@ -412,6 +432,14 @@ const ball = {
   owner: null,
   lastTouch: null,
   free: 0,
+  // Law 11 and Law 12 both turn on HOW the ball got here, not only where it is. A rebound off
+  // the woodwork, a deliberate save and a deliberate kick from a team mate are three different
+  // histories that lead to three different decisions, so the history is carried on the ball.
+  lastKickBy: null,
+  deliberateKick: false,
+  fromRebound: false,
+  fromSave: false,
+  still: 0,                    // how long it has sat unowned and motionless
 };
 const prevBall = new THREE.Vector3(0, 0.11, 0);
 const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12),
@@ -434,6 +462,23 @@ const G = {
   refText: 'PLAY ON', refUntil: 0,
   restart: 0, camMode: 0, fps: 0,
   autoSwitch: true,   // off = manual switching only, with Q
+  // ATTRACT MODE. The engine plays both sides and nobody has to hold the controls. It exists
+  // for two reasons: a stand at a trade fair where the screen has to keep playing while nobody
+  // is standing at it, and a check that wants to measure the match rather than a match with one
+  // striker standing still because no key is being pressed.
+  autoPlay: false,
+
+  // ---- the dead ball. Everything about a stopped game lives in one object, so there is
+  // exactly one place that knows whether the ball is live, and the answer is never inferred.
+  dead: null,          // {type, team, x, z, taker, wall, readyAt, indirect, text}
+  lastRestart: null,   // what the ball was last put back into play with - Law 11 needs it
+  lastRestartMinOpp: null,  // how far the nearest opponent was WHEN the kick was taken
+  awaitSecondTouch: false,  // an indirect free kick cannot go straight in
+  offside: null,       // the picture frozen at the moment of the last pass
+  advantage: null,     // a foul being played on, not yet resolved
+  counts: { throwIn:0, goalKick:0, cornerKick:0, directFreeKick:0, indirectFreeKick:0,
+            penaltyKick:0, droppedBall:0, offside:0, advantagePlayed:0, advantagePulled:0,
+            saves:0 },
 };
 
 function resetPositions(kickTeam){
@@ -449,7 +494,16 @@ function resetPositions(kickTeam){
   taker.pos.set(-taker.dir*0.9, 0);
   ball.pos.set(0, 0.11, 0); ball.vel.set(0,0,0);
   ball.owner = taker; ball.free = 0;
+  ball.lastTouch = taker; ball.lastKickBy = taker;
+  ball.deliberateKick = false; ball.fromRebound = false; ball.fromSave = false; ball.still = 0;
   G.controlled = teams[1][9];
+  // A kick off wipes every piece of dead-ball state. Leaving one of these set - a flag from a
+  // pass made before a goal, an advantage still being held - would apply a decision from the
+  // last passage of play to the next one.
+  G.dead = null; G.offside = null; G.advantage = null;
+  G.awaitSecondTouch = false; G.indirectKicker = null;
+  G.lastRestart = LAW.RESTART.KICK_OFF;
+  hideOffsideLine();
 }
 
 // ---------------------------------------------------------------------------- input
@@ -459,6 +513,9 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyP' && G.running) { G.paused = !G.paused; toast(G.paused?'PAUSED':''); }
   if (e.code === 'KeyC') G.camMode = (G.camMode + 1) % 2;
   if (e.code === 'KeyQ') switchPlayer();
+  if (e.code === 'KeyT') { G.autoPlay = !G.autoPlay;
+                           toast(G.autoPlay ? 'ATTRACT MODE - ENGINE PLAYS BOTH SIDES'
+                                            : 'CONTROLS BACK'); }
   if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
     e.preventDefault();
 });
@@ -516,9 +573,27 @@ function kickBall(p, dirX, dirZ, power, loft){
   const m = Math.hypot(dirX, dirZ) || 1;
   ball.owner = null; ball.free = 0.28;               // nobody may re-take it for a moment
   ball.lastTouch = p;
+  ball.lastKickBy = p;
+  ball.deliberateKick = true;
+  ball.fromRebound = false; ball.fromSave = false;
   ball.vel.set(dirX/m*power, loft, dirZ/m*power);
   ball.pos.y = Math.max(ball.pos.y, 0.14);
   p.kick = 1;
+
+  // LAW 11 IS JUDGED AT THE MOMENT THE BALL IS PLAYED, NEVER WHEN IT ARRIVES. That is the
+  // whole difficulty of offside, and the reason the snapshot is taken HERE, inside the one
+  // function every kick in the game goes through, rather than at each call site where it could
+  // be left out of one of them. The passer himself is not in the list: a player cannot be
+  // offside from his own pass.
+  G.offside = LAW.snapshotOffside({
+    attackers: teams[p.team].filter(q => q !== p).map(q => q.pt()),
+    opponents: teams[1-p.team].map(q => q.pt()),
+    ballX: p.pos.x, dir: p.dir, restartType: G.lastRestart,
+  });
+  G.offside.byTeam = p.team;
+  G.offside.passer = p.uid;
+  showOffsideLine(G.offside.line, G.offside.flagged.length > 0);
+  G.lastRestart = null;                 // the exemption covers the FIRST touch and no more
 }
 function bestPassTarget(p){
   const mates = teams[p.team].filter(q => q !== p && !q.off);
@@ -555,7 +630,10 @@ function doShoot(p, power){
   if (ball.owner !== p || p.cooldown > 0) return;
   const gx = p.dir*PITCH_X, gz = clamp((rnd()-0.5)*5.4, -3.1, 3.1);
   const d = Math.hypot(gx-p.pos.x, gz-p.pos.y);
-  const acc = clamp(1 - d/60, 0.25, 1);
+  // Accuracy falls off with range, and even a close shot is not perfect. The old curve reached
+  // 1.00 inside six metres, so a measured four-shot spell produced three goals and one miss and
+  // the goal line Laws almost never came up.
+  const acc = clamp(1 - d/50, 0.26, 0.96);
   const sx = gx - p.pos.x + (rnd()-0.5)*(1-acc)*16;
   const sz = gz - p.pos.y + (rnd()-0.5)*(1-acc)*14;
   kickBall(p, sx, sz, clamp(19 + power*11, 19, 31), clamp(d*0.07, 0.6, 3.4));
@@ -569,14 +647,28 @@ function doTackle(p){
   if (!victim || victim.team === p.team) return;
   const d = p.pos.distanceTo(victim.pos);
   if (d > 2.4) return;
-  const clean = rnd() < clamp(0.78 - d*0.18, 0.15, 0.8);
+  const clean = rnd() < clamp(0.93 - d*0.11, 0.55, 0.93);
   if (clean) { ball.owner = p; ball.lastTouch = p; ball.free = 0.12; setRef('TACKLE WON'); }
   else foul(p, victim);
 }
 
 // ---------------------------------------------------------------------------- referee
 const CARD_COLOURS = {green:'#22c55e', yellow:'#eab308', red:'#dc2626', black:'#111111'};
+// The offences this model can actually produce. Each is a real name from Law 12 rather than a
+// number, because the restart is decided by WHICH offence it was and not by how bad it looked.
+const TACKLE_OFFENCES = ['trip', 'push', 'hold', 'charge', 'tackle'];
+
 function foul(offender, victim){
+  const offence = TACKLE_OFFENCES[Math.floor(rnd()*TACKLE_OFFENCES.length)];
+  const x = victim.pos.x, z = victim.pos.y;
+
+  // The restart is not decided here. It is asked of the rules layer, which knows that a direct
+  // free kick offence by a defender inside his own penalty area is a penalty and that an
+  // indirect one in the same place is not.
+  const dec = LAW.foulRestart({ offence, x, z, offenderDir: offender.dir,
+                                offenderIsDefending: true });
+  dec.team = victim.team;
+
   const severity = rnd();
   let card = 'green';
   if (severity > 0.93) card = 'red';
@@ -585,12 +677,46 @@ function foul(offender, victim){
   offender.cards++;
   G.cards[card[0]]++;
   showCard(card);
-  setRef('FOUL - ' + card.toUpperCase());
   if (card === 'red') { offender.off = true; offender.rig.root.visible = false; }
-  // Free kick to the side that was fouled: the ball is placed and given to the victim.
-  ball.owner = victim; ball.free = 0.5; ball.vel.set(0,0,0);
-  ball.pos.set(victim.pos.x, 0.11, victim.pos.y);
+
+  // ADVANTAGE. If the side that was fouled still has the ball and is going forward, the referee
+  // holds the whistle for a few seconds rather than pulling it back. That decision is made
+  // ACROSS TIME, so it cannot be taken here - it is opened here and polled every step, and the
+  // free kick that was already worked out above is carried inside it in case it has to be given
+  // after all. A card is shown either way: the offence happened whether or not play went on.
+  const keptIt = ball.owner === victim || (ball.lastTouch === victim && ball.free <= 0);
+  if (keptIt && card !== 'red') {
+    G.advantage = LAW.advantageOpen(G.t, dec);
+    G.advantage.victimTeam = victim.team;
+    setRef('ADVANTAGE');
+    for (const p of all) p.cooldown = Math.max(p.cooldown, 0.25);
+    return;
+  }
+  setRef('FOUL - ' + card.toUpperCase());
+  awardRestart(dec);
   for (const p of all) p.cooldown = Math.max(p.cooldown, 0.5);
+}
+
+function pollAdvantage(){
+  if (!G.advantage || G.advantage.resolved) return;
+  const t = G.advantage.victimTeam;
+  // "The attack is still on" is not the same as "somebody currently has the ball in his feet".
+  // The first version asked only about ball.owner, and because the ball is unowned for most of
+  // every pass, four advantages out of five were pulled back on a technicality - the referee
+  // blew up in the middle of a move that was going perfectly well. The ball in flight belongs
+  // to whoever last touched it.
+  const withTeam = ball.owner ? ball.owner.team : (ball.lastTouch ? ball.lastTouch.team : null);
+  const r = LAW.advantagePoll(G.advantage, G.t, {
+    foulingTeamHasBall: !!ball.owner && ball.owner.team !== t,
+    goalScored: false,
+    attackStillOn: withTeam === t,
+  });
+  if (!r.resolved) return;
+  G.advantage = null;
+  if (r.resolved === 'played') { G.counts.advantagePlayed++; setRef('ADVANTAGE PLAYED'); return; }
+  G.counts.advantagePulled++;
+  toast('BACK FOR THE FOUL');
+  awardRestart(r.foul);
 }
 function showCard(kind){
   const f = document.getElementById('flash');
@@ -612,7 +738,320 @@ function toast(t){
                                          el.style.opacity = '0'; }); }
 }
 
+// ============================================================================================
+// RESTARTS - the dead ball
+//
+// Everything about a stopped match lives in ONE object, G.dead. There is therefore exactly one
+// place in the program that knows whether the ball is live, and no part of the code has to
+// infer it from a velocity or a timer. When G.dead is set the ball does not move, the players
+// walk to where the Law says they must stand, and when the taker arrives the restart is played.
+//
+// EVERY RESTART MUST BE RESOLVABLE. A taker who cannot reach the ball - shoved off by the
+// crowding code, sent off between the award and the kick - would freeze the match forever, so
+// after four seconds the taker is placed on the ball and it is taken regardless. A rule that can
+// deadlock the game is worse than a rule that is slightly wrong.
+// ============================================================================================
+const RESTART_DELAY = {
+  [LAW.RESTART.THROW_IN]: 1.0, [LAW.RESTART.GOAL_KICK]: 1.4, [LAW.RESTART.CORNER]: 1.7,
+  [LAW.RESTART.DIRECT]: 1.8, [LAW.RESTART.INDIRECT]: 1.8, [LAW.RESTART.PENALTY]: 2.4,
+  [LAW.RESTART.DROPPED]: 1.2,
+};
+
+function pickTaker(team, x, z, keeper){
+  if (keeper) return teams[team][0];
+  const c = teams[team].filter(p => !p.off && !p.gk);
+  if (!c.length) return teams[team].find(p => !p.off) || teams[team][0];
+  c.sort((a,b) => Math.hypot(a.pos.x-x, a.pos.y-z) - Math.hypot(b.pos.x-x, b.pos.y-z));
+  return c[0];
+}
+
+function awardRestart(dec){
+  if (!dec || !dec.type) return false;
+  const type = dec.type, team = dec.team;
+  ball.owner = null; ball.vel.set(0,0,0); ball.free = 0; ball.still = 0;
+  ball.pos.set(dec.x, 0.11, dec.z);
+  prevBall.copy(ball.pos);
+
+  const taker = pickTaker(team, dec.x, dec.z,
+                          type === LAW.RESTART.GOAL_KICK || dec.toGoalkeeper);
+  // The wall. Only at a free kick, only when the kick is near enough to be worth one, and the
+  // count and the distance both come out of the rules layer rather than being typed here.
+  let wall = [], wallUids = [];
+  if (type === LAW.RESTART.DIRECT || type === LAW.RESTART.INDIRECT) {
+    const defendDir = teams[1-team][0].dir;
+    const dGoal = Math.hypot(dec.x + defendDir*PITCH_X, dec.z);
+    const n = dGoal < 30 ? 4 : dGoal < 42 ? 2 : 0;
+    if (n) {
+      wall = LAW.wallFor({ ballX: dec.x, ballZ: dec.z, defendDir, count: n }).positions;
+      // Sorted by distance to WHERE THE WALL GOES, not to where the ball is. Sorting by the
+      // ball picks up whoever happens to be standing nearest it, including men on the far side
+      // of it, and a man on the far side has to cross the free kick spot to reach his place.
+      // One did: he walked to within 0.72 m of the ball and was still there when the referee
+      // was waiting for the wall to be legal.
+      const wc = wall.length ? wall[Math.floor(wall.length/2)] : {x: dec.x, z: dec.z};
+      const cands = teams[1-team].filter(p => !p.off && !p.gk)
+        .sort((a,b) => Math.hypot(a.pos.x-wc.x, a.pos.y-wc.z)
+                     - Math.hypot(b.pos.x-wc.x, b.pos.y-wc.z));
+      wallUids = cands.slice(0, n).map(p => p.uid);
+    }
+  }
+  G.dead = { type, team, x: dec.x, z: dec.z, taker, wall, wallUids,
+             readyAt: G.t + (RESTART_DELAY[type] || 1.2),
+             indirect: type === LAW.RESTART.INDIRECT,
+             toGoalkeeper: !!dec.toGoalkeeper,
+             text: LAW.RESTART_TEXT[type] || 'RESTART' };
+  if (G.counts[type] !== undefined) G.counts[type]++;
+  G.offside = null;
+  G.advantage = null;
+  setRef(G.dead.text);
+  return true;
+}
+
+// Where a player stands while the ball is dead. The required distance is asked of the rules
+// layer for every restart rather than being one number reused everywhere - a dropped ball is
+// 4 m, a free kick is 9.15 m, and a throw in is 2 m, and they are three different Laws.
+function requiredDistance(d){
+  if (d.type === LAW.RESTART.DROPPED)  return LAW.LAWS.droppedBallSeparation;
+  if (d.type === LAW.RESTART.THROW_IN) return LAW.LAWS.throwInDistance || 2;
+  if (d.type === LAW.RESTART.PENALTY)  return LAW.PITCH.penaltyArcRadius;
+  return LAW.LAWS.freeKickDistance;
+}
+function toward(p, x, z, cap, stop){
+  const dx = x - p.pos.x, dz = z - p.pos.y, m = Math.hypot(dx, dz);
+  if (m < (stop === undefined ? 0.35 : stop)) return {x:0, z:0, m:0};
+  return {x:dx/m, z:dz/m, m: clamp(m/4, 0.3, cap === undefined ? 1 : cap)};
+}
+// No target an opponent walks to during a dead ball may be inside the distance the Law gives.
+// The wall used to be built at exactly 9.15 m and then walked to with a 0.35 m arrival
+// tolerance, so the men in it settled at 8.6 m and the free kick was taken with the wall
+// standing half a metre inside the Law - correct in the constant, wrong on the grass.
+//
+// DECISION, not a Law: the extra 0.30 m of margin. The Law gives a minimum, so standing a
+// little further back is legal; standing a little closer is not, and a stopping tolerance has
+// to fall on the legal side of a one sided limit.
+// Walk AROUND the ball, never through it. A player whose place is on the far side of a free
+// kick would otherwise take the straight line to it, which goes across the spot - so he would
+// spend several seconds standing on top of the ball while the referee waited for him to get
+// back. This steps him round the exclusion circle instead, which is what a defender does.
+function routeAround(p, tx, tz, cx, cz, req){
+  const px = p.pos.x, pz = p.pos.y;
+  const vx = tx - px, vz = tz - pz, L2 = vx*vx + vz*vz;
+  let t = L2 < 1e-9 ? 0 : ((cx - px)*vx + (cz - pz)*vz) / L2;
+  t = clamp(t, 0, 1);
+  const qx = px + vx*t, qz = pz + vz*t;
+  if (Math.hypot(qx - cx, qz - cz) >= req) return {x: tx, z: tz};
+  const a0 = Math.atan2(pz - cz, px - cx);
+  const a1 = Math.atan2(tz - cz, tx - cx);
+  let da = a1 - a0;
+  while (da >  Math.PI) da -= 2*Math.PI;
+  while (da < -Math.PI) da += 2*Math.PI;
+  const a = a0 + (da >= 0 ? 1 : -1) * Math.min(Math.abs(da), 0.9);
+  const r = Math.max(req, Math.hypot(px - cx, pz - cz));
+  return {x: cx + Math.cos(a)*r, z: cz + Math.sin(a)*r};
+}
+function pushOut(tx, tz, cx, cz, req){
+  const dx = tx - cx, dz = tz - cz, m = Math.hypot(dx, dz);
+  if (m >= req) return {x:tx, z:tz};
+  if (m < 1e-6) return {x:cx + req, z:cz};
+  return {x: cx + dx/m*req, z: cz + dz/m*req};
+}
+function thinkDead(p){
+  const d = G.dead;
+  if (p === d.taker) return toward(p, d.x, d.z);
+  if (d.type === LAW.RESTART.PENALTY) {
+    // Everybody except the taker and the defending keeper stands outside the area, outside the
+    // arc and behind the ball. The keeper stays on his line.
+    if (p.gk && p.team !== d.team) {
+      const gx = -p.dir * PITCH_X;
+      return toward(p, gx, clamp(ball.pos.z*0.3, -GOAL_Z+0.3, GOAL_Z-0.3));
+    }
+    const away = -Math.sign(d.x) || 1;      // back towards the halfway line
+    return toward(p, d.x + away*12, clamp(p.pos.y, -PITCH_Z+3, PITCH_Z-3));
+  }
+  const req = requiredDistance(d) + 0.30;
+  const idx = d.wallUids.indexOf(p.uid);
+  if (idx >= 0 && d.wall[idx]) {
+    const t = pushOut(d.wall[idx].x, d.wall[idx].z, d.x, d.z, req);
+    const r = routeAround(p, t.x, t.z, d.x, d.z, req);
+    return toward(p, r.x, r.z, 1, 0.15);
+  }
+  const dist = Math.hypot(p.pos.x - d.x, p.pos.y - d.z);
+  if (p.team !== d.team && dist < req) {
+    const ax = p.pos.x - d.x, az = p.pos.y - d.z, m = Math.hypot(ax, az) || 1;
+    return toward(p, d.x + ax/m*(req + 0.5), d.z + az/m*(req + 0.5), 1, 0.15);
+  }
+  const home = p.homeFor(d.x);
+  if (p.team === d.team) return toward(p, home.x, home.y, 0.7);
+  const t = pushOut(home.x, home.y, d.x, d.z, req);
+  const r = routeAround(p, t.x, t.z, d.x, d.z, req);
+  return toward(p, r.x, r.z, 0.7);
+}
+
+function stepDead(dt){
+  const d = G.dead;
+  ball.pos.set(d.x, 0.11, d.z);
+  ball.vel.set(0,0,0);
+  prevBall.copy(ball.pos);
+  if (G.t < d.readyAt) return;
+  const t = d.taker;
+  if (!t || t.off) { G.dead = null; return; }
+  // A free kick is not taken while the wall is still standing inside the Law. The referee
+  // waits, which is what freeKickLegal in the rules layer is FOR - it was written and then not
+  // called, so the wall was correct in the constant and eight point six metres on the grass.
+  // The four second escape hatch below still applies: waiting for ever is worse than kicking
+  // with a defender half a metre too close.
+  if (d.type === LAW.RESTART.DIRECT || d.type === LAW.RESTART.INDIRECT) {
+    const opp = teams[1-d.team].filter(p => !p.off).map(p => p.pt());
+    if (!LAW.freeKickLegal({ opponents: opp, ballX: d.x, ballZ: d.z }).legal
+        && G.t < d.readyAt + 4) { setRef('WAITING FOR THE WALL'); return; }
+  }
+  // Recorded HERE, at the instant the kick goes, because that is the instant the Law asks
+  // about. A check that measures it from outside is always one frame stale - it reads the
+  // positions from before the last move, which came out 2 cm inside a limit the referee had
+  // just measured as satisfied.
+  {
+    let m = 1e9;
+    for (const p of teams[1-d.team]) if (!p.off)
+      m = Math.min(m, Math.hypot(p.pos.x - d.x, p.pos.y - d.z));
+    G.lastRestartMinOpp = +m.toFixed(3);
+  }
+  const close = Math.hypot(t.pos.x - d.x, t.pos.y - d.z) < 1.1;
+  // Beside the ball, not on it. The guard in unit() is what actually makes this safe, but a
+  // taker standing inside the ball is wrong to look at as well.
+  if (close || G.t > d.readyAt + 4) { t.pos.set(d.x - t.dir*0.45, d.z); takeRestart(d); }
+}
+
+function takeRestart(d){
+  const t = d.taker;
+  G.dead = null;
+  G.lastRestart = d.type;
+  G.awaitSecondTouch = d.indirect;
+  G.indirectKicker = d.indirect ? t.uid : null;
+  ball.pos.set(d.x, 0.11, d.z);
+  ball.fromRebound = false; ball.fromSave = false;
+  ball.lastTouch = t; ball.lastKickBy = t;
+  t.cooldown = 0;
+
+  if (d.type === LAW.RESTART.DROPPED) {
+    // Law 8: dropped FOR one player. He gets it, and play is live again.
+    ball.owner = t; ball.free = 0; ball.deliberateKick = false;
+    setRef('DROPPED BALL'); return;
+  }
+  ball.owner = t;                       // so the kick helpers accept it, cleared by kickBall
+  if (d.type === LAW.RESTART.PENALTY) { doShoot(t, 1); setRef('PENALTY TAKEN'); return; }
+  if (d.type === LAW.RESTART.CORNER) {
+    // Into the middle of the six yard area, lofted. A goal may be scored directly.
+    const gx = t.dir * (PITCH_X - 6);
+    kickBall(t, gx - d.x, 0 - d.z, 21, 3.4); setRef('CORNER TAKEN'); return;
+  }
+  if (d.type === LAW.RESTART.GOAL_KICK) {
+    const q = bestPassTarget(t);
+    const ax = q ? q.pos.x - d.x : t.dir*40, az = q ? q.pos.y - d.z : 0;
+    kickBall(t, ax, az, 27, 3.2); setRef('GOAL KICK TAKEN'); return;
+  }
+  if (d.type === LAW.RESTART.THROW_IN) {
+    const q = bestPassTarget(t);
+    const ax = q ? q.pos.x - d.x : t.dir*10, az = q ? q.pos.y - d.z : -Math.sign(d.z)*8;
+    // A throw is not a kick. It is shorter, it is lofted, and Law 15 says no goal can be
+    // scored directly from it - which the goal check reads off G.lastRestart.
+    kickBall(t, ax, az, 13, 2.0); setRef('THROW IN TAKEN'); return;
+  }
+  // A free kick. Direct and near enough goal, have a go; otherwise play it.
+  const gx = t.dir*PITCH_X, dGoal = Math.hypot(gx - d.x, d.z);
+  if (!d.indirect && dGoal < 30) { doShoot(t, 0.9); setRef('FREE KICK'); return; }
+  const q = bestPassTarget(t);
+  const ax = q ? q.pos.x - d.x : t.dir*20, az = q ? q.pos.y - d.z : 0;
+  kickBall(t, ax, az, clamp(dGoal*0.6, 12, 24), 1.6);
+  setRef(d.indirect ? 'INDIRECT FREE KICK' : 'FREE KICK');
+}
+
+// ---------------------------------------------------------------------------- Law 11 in play
+//
+// The flag decision, in the two halves it really has. snapshotOffside freezes the picture at
+// the instant the ball is PLAYED - that call is inside kickBall, so it cannot be forgotten -
+// and judgeOffside asks the rules layer whether the player who then got the ball was one of the
+// ones standing in an offside position. Neither half decides anything on its own.
+function judgeOffside(receiver){
+  const s = G.offside;
+  if (!s) return false;
+  if (receiver.team !== s.byTeam) { G.offside = null; return false; }
+  if (receiver.uid === s.passer) return false;
+  const res = LAW.offsideOffence(s, { touchedBy: receiver.uid,
+                                      fromRebound: ball.fromRebound,
+                                      fromSave: ball.fromSave });
+  G.offside = null;
+  if (!res.offence) return false;
+  const f = s.flagged.find(x => x.id === res.id) || { x: receiver.pos.x, z: receiver.pos.y };
+  G.counts.offside++;
+  setRef('OFFSIDE'); toast('OFFSIDE');
+  awardRestart({ type: LAW.RESTART.INDIRECT, team: 1 - receiver.team, x: f.x, z: f.z });
+  return true;
+}
+
+// The other way a player in an offside position commits an offence: he never touches the ball,
+// but he stands in the goalkeeper's line of sight as it goes in. The cone test is in the rules
+// layer, including the half of it that says a player BEHIND the ball is not in the way.
+function offsideByVision(scoringTeam){
+  const s = G.offside;
+  if (!s || s.byTeam !== scoringTeam || !s.flagged.length) return null;
+  const keeper = teams[1-scoringTeam][0];
+  if (keeper.off) return null;
+  for (const f of s.flagged) {
+    const pl = all.find(p => p.uid === f.id);
+    if (!pl || pl.off) continue;
+    if (LAW.blocksVision({ player: {x: pl.pos.x, z: pl.pos.y},
+                           keeper: {x: keeper.pos.x, z: keeper.pos.y},
+                           ball:   {x: ball.pos.x,  z: ball.pos.z} })) {
+      const res = LAW.offsideOffence(s, { touchedBy: null, blockedVisionOf: f.id });
+      if (res.offence) return f;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------- Law 12, keeper
+function keeperLaws(dt){
+  for (const p of all) if (p.gk && ball.owner !== p) p.holding = 0;
+  const o = ball.owner;
+  if (!o || !o.gk || G.dead) return;
+  if (!LAW.inPenaltyArea(o.pos.x, o.pos.y, o.dir)) { o.holding = 0; return; }
+
+  if (o.holding === 0 && ball.lastKickBy && ball.lastKickBy !== o &&
+      ball.lastKickBy.team === o.team) {
+    const bp = LAW.backPassOffence({ handled: true, lastTouchWasTeamMate: true,
+                                     deliberateKick: ball.deliberateKick });
+    if (bp.offence) {
+      toast('BACK PASS');
+      awardRestart({ type: bp.restart, team: 1-o.team, x: o.pos.x, z: o.pos.y });
+      return;
+    }
+  }
+  o.holding += dt;
+  const h = LAW.goalkeeperHold(o.holding);
+  if (h.offence) {
+    o.holding = 0;
+    toast('SIX SECONDS');
+    awardRestart({ type: h.restart, team: 1-o.team, x: o.pos.x, z: o.pos.y });
+  }
+}
+
 // ---------------------------------------------------------------------------- AI
+//
+// EVERY DIRECTION IN THIS FILE GOES THROUGH HERE. Dividing a vector by its own length is how a
+// direction is worked out, and it is also how a NaN gets into a football match: the length is
+// zero exactly when the player is standing on the thing he is running at, and 0/0 is not a
+// number. It then spreads - the velocity is NaN, the position is NaN, the mesh is NaN - and the
+// player vanishes with no error printed anywhere.
+//
+// That is not hypothetical. It happened at 17.7 seconds of an unattended match, to a centre
+// back, immediately after a free kick: takeRestart places the taker EXACTLY on the ball, so on
+// the next frame his distance to the ball was zero and he was also the nearest man to it. The
+// symptom was one player quietly disappearing. There is now one guarded helper and no bare
+// division by a length anywhere in the AI.
+function unit(dx, dz, m){
+  if (!(m > 1e-6)) return {x:0, z:0, m:0};
+  return {x: dx/m, z: dz/m, m: 1};
+}
 function think(p, dt){
   if (p.off) return {x:0, z:0, m:0};
   const bp = v2(ball.pos);
@@ -620,22 +1059,65 @@ function think(p, dt){
   const dBall = toBall.length();
 
   if (p.gk) {                                    // keeper: stay on the line, come for it close
-    const gx = p.dir*(PITCH_X-1.2);
-    const tz = clamp(ball.pos.z*0.42, -GOAL_Z-1.2, GOAL_Z+1.2);
+    // A KEEPER DEFENDS THE GOAL BEHIND HIM. This line used to read p.dir*(PITCH_X-1.2), which
+    // is the goal his team is ATTACKING, so within about fifteen seconds of kick off both
+    // goalkeepers had walked the length of the pitch and were standing in the opposition net.
+    // It never looked obviously wrong on screen - a keeper off his line is a normal sight - and
+    // nothing failed, because no check had ever measured a keeper's x. It was found by asking
+    // why nine shots had produced seven goals and no saves at all. The lesson is the same one
+    // this project keeps relearning: an unmeasured quantity is not a working one.
+    const gx = -p.dir*(PITCH_X-1.2);
+    let tz = clamp(ball.pos.z*0.42, -GOAL_Z-1.2, GOAL_Z+1.2);
+    // If a loose ball is travelling towards this goal, go to where it will CROSS the line
+    // rather than to where it is now. A keeper who tracks the ball's present position is
+    // permanently a metre behind the shot.
+    if (!ball.owner && ball.vel.x * -p.dir > 2) {
+      const tc = (gx - ball.pos.x) / ball.vel.x;
+      if (tc > 0 && tc < 2.5)
+        tz = clamp(ball.pos.z + ball.vel.z*tc, -GOAL_Z-0.5, GOAL_Z+0.5);
+    }
     let tx = gx;
-    if (dBall < 12 && Math.abs(ball.pos.x - gx) < 13) tx = gx - p.dir*3.4;
+    if (dBall < 12 && Math.abs(ball.pos.x - gx) < 13) tx = gx + p.dir*3.4;
     const d = new THREE.Vector2(tx - p.pos.x, tz - p.pos.y);
-    return d.length() < 0.3 ? {x:0,z:0,m:0} : {x:d.x/d.length(), z:d.y/d.length(),
-                                               m:clamp(d.length()/3,0.25,1)};
+    const dl = d.length();
+    if (dl < 0.3) return {x:0, z:0, m:0};
+    return {x:d.x/dl, z:d.y/dl, m:clamp(dl/3, 0.25, 1)};
   }
-  if (ball.owner === p) {                        // on the ball: shoot, pass, or carry
+  if (ball.owner === p) {                        // on the ball: shoot, pass, carry, or clear
     const gx = p.dir*PITCH_X;
     const dGoal = Math.hypot(gx-p.pos.x, p.pos.y);
+    // A defender under pressure in his own third hoofs it upfield and towards the touchline.
+    //
+    // This was added because of a MEASUREMENT, not a hunch: four minutes of engine against
+    // engine produced no throw ins, no corners and no goal kicks at all. The ball simply never
+    // left the field, because nobody in the model ever did anything other than pass to a team
+    // mate. Every Law written this week would have been correct and invisible. A rule that
+    // cannot occur has not been delivered.
+    const inOwnThird = p.pos.x * p.dir < -PITCH_X*0.42;
+    let press = 99;
+    for (const o of teams[1-p.team]) if (!o.off) press = Math.min(press, o.pos.distanceTo(p.pos));
+    if (!p.gk && inOwnThird && press < 3.3 && p.cooldown <= 0 && rnd() < 0.3) {
+      // Very deep and under pressure, a defender will put it behind for a corner rather than
+      // try to play it across his own goal. Without this branch the model produced no corners
+      // at all in four measured minutes, so Law 17 was written and unreachable.
+      const veryDeep = p.pos.x * p.dir < -(PITCH_X - 14);
+      if (veryDeep && rnd() < 0.45) {
+        const ownGoalX = -p.dir*(PITCH_X + 2);
+        const wide = (Math.sign(p.pos.y) || 1) * (GOAL_Z + 6);
+        kickBall(p, ownGoalX - p.pos.x, wide - p.pos.y, 15, 2.2);
+        p.cooldown = 0.5;
+        return {x:0, z:0, m:0};
+      }
+      const tz = (Math.sign(p.pos.y) || 1) * (PITCH_Z + 1.5);
+      kickBall(p, p.dir*38, tz - p.pos.y, 27, 3.6);
+      p.cooldown = 0.5;
+      return {x:0, z:0, m:0};
+    }
     if (dGoal < 26 && p.cooldown <= 0 && rnd() < 0.05) { doShoot(p, rnd()); }
     else if (p.cooldown <= 0 && rnd() < 0.045) { doPass(p); }
     const tz = clamp(p.pos.y*0.6, -PITCH_Z+4, PITCH_Z-4);
     const d = new THREE.Vector2(gx - p.pos.x, tz - p.pos.y);
-    return {x:d.x/d.length(), z:d.y/d.length(), m:1};
+    return unit(d.x, d.y, d.length());
   }
   const mine = ball.owner && ball.owner.team === p.team;
   // Exactly one outfielder presses. Everyone chasing is how a toy football game looks.
@@ -643,7 +1125,12 @@ function think(p, dt){
     .sort((a,b) => a.pos.distanceTo(bp) - b.pos.distanceTo(bp))[0];
   if (!mine && p === nearest) {
     const d = toBall.clone();
-    return {x:d.x/dBall, z:d.y/dBall, m:1};
+    // Close enough to challenge, so challenge. Before this only the human being ever tackled,
+    // which meant an engine-against-engine match produced no fouls, no cards, no free kicks,
+    // no advantage and no penalties - the whole of Law 12 sat there unable to fire. The odds
+    // are low per frame because this is checked sixty times a second.
+    if (ball.owner && dBall < 2.2 && p.cooldown <= 0 && rnd() < 0.055) doTackle(p);
+    return unit(d.x, d.y, dBall);
   }
   const home = p.homeFor(ball.pos.x);
   if (mine) {                                     // in possession: push up and spread
@@ -667,7 +1154,15 @@ function step(dt){
     if (p.tackle > 0) p.tackle = Math.max(0, p.tackle - dt*1.6);
 
     let want, sprint = false;
-    if (p === G.controlled && !p.off) {
+    if (G.dead && p !== G.dead.taker && p === G.controlled && !p.off && !G.autoPlay) {
+      // The ball is dead, so nothing can be kicked, but the player is not frozen either - he
+      // can walk into space while the referee sets it up, which is what a person does.
+      want = inputVector();
+      sprint = false;
+      shootHeld = 0;
+    } else if (G.dead) {
+      want = thinkDead(p);
+    } else if (p === G.controlled && !p.off && !G.autoPlay) {
       const iv = inputVector();
       want = iv;
       sprint = !!(keys.ShiftLeft || keys.ShiftRight || touch.sprint);
@@ -711,6 +1206,8 @@ function step(dt){
     }
 
   // ---- ball
+  if (G.dead) { stepDead(dt); afterBall(dt); return; }
+
   prevBall.copy(ball.pos);
   if (ball.free > 0) ball.free -= dt;
   if (ball.owner) {
@@ -735,28 +1232,45 @@ function step(dt){
         const d = Math.hypot(p.pos.x-ball.pos.x, p.pos.y-ball.pos.z);
         if (d < 1.15 && ball.pos.y < 1.0 && d < bd) { bd = d; best = p; }
       }
-      if (best) { ball.owner = best; ball.lastTouch = best; }
-    }
-    // out of play: throw in / goal kick, kept simple and always resolvable
-    if (Math.abs(ball.pos.z) > PITCH_Z) {
-      ball.pos.z = Math.sign(ball.pos.z)*(PITCH_Z-0.4); ball.vel.set(0,0,0);
-      const side = ball.lastTouch ? 1-ball.lastTouch.team : 0;
-      const taker = teams[side].filter(p=>!p.gk&&!p.off)
-        .sort((a,b)=>a.pos.distanceTo(v2(ball.pos))-b.pos.distanceTo(v2(ball.pos)))[0];
-      if (taker) { ball.owner = taker; ball.free = 0.3;
-                   taker.pos.set(ball.pos.x, ball.pos.z); }
-      setRef('THROW IN');
+      const sp = Math.hypot(ball.vel.x, ball.vel.z);
+      if (best && best.gk && sp > 13) {
+        // A keeper does not simply pick up a shot travelling at 20 m/s: he parries it. This is
+        // not decoration. Law 11 treats a ball that comes off a DELIBERATE SAVE differently
+        // from one an opponent deliberately played - it is the single case where the "it came
+        // off a defender" exemption does NOT rescue a player standing in an offside position.
+        // Without a save in the model that clause could never be reached, so it could never be
+        // shown to be working.
+        const behind = rnd() < 0.42;
+        if (behind) ball.vel.set(ball.vel.x*0.30, 2.4, ball.vel.z*0.3);   // tipped over, corner
+        else ball.vel.set(-ball.vel.x*0.34, 2.2,
+                          ball.vel.z*0.3 + (Math.sign(ball.pos.z) || 1)*6.5);
+        ball.fromSave = true; ball.free = 0.24; ball.lastTouch = best; ball.lastKickBy = best;
+        ball.deliberateKick = false; G.counts.saves++;
+        setRef('SAVE'); toast('SAVE');
+      } else if (best) {
+        const wasFlagged = !!G.offside;
+        ball.owner = best; ball.lastTouch = best;
+        // A second player has touched it, so an indirect free kick may now produce a goal.
+        if (G.awaitSecondTouch && best.uid !== G.indirectKicker) G.awaitSecondTouch = false;
+        if (wasFlagged && judgeOffside(best)) { afterBall(dt); return; }
+      }
     }
   }
 
-  // ---- the goal line
+  // ---- THE WOODWORK, then the goal line, in that order and at two different planes.
   //
-  // THE FIRST VERSION OF THIS TESTED THE BALL'S POSITION ONCE A FRAME. At 31 m/s the ball
-  // travels half a metre between frames, so whether a shot was a goal depended on where the
-  // sampling happened to land - and a ball that clipped the frame passed straight through it.
-  // Now the crossing point is worked out by interpolating between the previous position and
-  // this one, so the answer does not depend on the frame rate, and the posts and the bar are
-  // solid.
+  // The posts stand ON the goal line, so a ball that hits one never travels far enough to
+  // satisfy the whole-ball-over-the-whole-line test that decides a goal. Testing them both at
+  // one plane means either the frame is solid and no goal can ever be given, or goals are given
+  // and the frame is made of air. So the woodwork is tested where the woodwork is, at the line,
+  // and the goal is tested a ball's radius beyond it - and the two bands do not overlap, which
+  // is what makes a shot just inside the post a goal rather than a rebound.
+  //
+  // Both are worked out by INTERPOLATING between the previous position and this one. An earlier
+  // version sampled the position once a frame; at 31 m/s the ball moves half a metre between
+  // frames, so a shot's fate depended on where the sampling happened to land.
+  const R = LAW.PITCH.ballRadius;
+  let hitWood = false;
   for (const s of [-1, 1]) {
     const planeX = s*PITCH_X;
     const wasBefore = (prevBall.x - planeX)*s < 0;
@@ -766,33 +1280,96 @@ function step(dt){
     const t = Math.abs(dx) < 1e-6 ? 0 : (planeX - prevBall.x)/dx;
     const zc = prevBall.z + (ball.pos.z - prevBall.z)*t;
     const yc = prevBall.y + (ball.pos.y - prevBall.y)*t;
-    if (Math.abs(zc) < GOAL_Z && yc < GOAL_Y) {
-      const scorer = s > 0 ? 0 : 1;                // team 0 attacks +x
-      G.score[scorer]++;
-      toast('GOAL'); setRef('GOAL');
-      resetPositions(1-scorer);
-      return;
-    }
-    // Inside the woodwork rather than through it. A post is 0.09 m of round steel; anything
-    // whose centre passes within a ball's radius of it comes back out.
-    const hitPost = Math.abs(Math.abs(zc) - GOAL_Z) < 0.20 && yc < GOAL_Y + 0.20;
-    const hitBar  = Math.abs(zc) < GOAL_Z + 0.20 && Math.abs(yc - GOAL_Y) < 0.20;
+    const az = Math.abs(zc);
+    const hitPost = az >= GOAL_Z - R && az <= GOAL_Z + R + 0.09 && yc < GOAL_Y + 0.20;
+    const hitBar  = az <= GOAL_Z + R && yc >= GOAL_Y - R && yc <= GOAL_Y + R + 0.09;
     if (hitPost || hitBar) {
       ball.pos.set(planeX - s*0.16, Math.max(0.11, yc), zc);
       if (hitBar) { ball.vel.y = -Math.abs(ball.vel.y) - 1.5; ball.vel.x *= -0.35; }
       else        { ball.vel.z = -ball.vel.z*0.6; ball.vel.x *= -0.5; }
       ball.free = 0.15;
+      ball.fromRebound = true;                  // Law 11: playing it now is gaining an advantage
+      hitWood = true;
       setRef(hitBar ? 'OFF THE BAR' : 'OFF THE POST');
       toast(hitBar ? 'OFF THE BAR' : 'OFF THE POST');
     }
   }
-  if (Math.abs(ball.pos.x) > PITCH_X + 1.5) {      // behind, not in: goal kick
-    const side = ball.pos.x > 0 ? 1 : 0;
-    const gk = teams[side][0];
-    ball.owner = gk; ball.free = 0.4; ball.vel.set(0,0,0);
-    ball.pos.set(gk.pos.x, 0.11, gk.pos.y);
-    setRef('GOAL KICK');
+
+  if (!hitWood) {
+    const gc = LAW.goalCrossing({x:prevBall.x, y:prevBall.y, z:prevBall.z},
+                                {x:ball.pos.x, y:ball.pos.y, z:ball.pos.z});
+    if (gc.crossed && gc.goal) {
+      const scorer = gc.side > 0 ? 0 : 1;          // team 0 attacks +x
+      // Three ways a ball that went in is not a goal, all of them Laws and none of them here:
+      // straight from an indirect free kick, straight from a throw in, and offside by a player
+      // who never touched it but stood in the keeper's line of sight.
+      if (G.awaitSecondTouch) {
+        toast('NO GOAL - INDIRECT');
+        awardRestart({ type: LAW.RESTART.GOAL_KICK, team: 1-scorer,
+                       x: gc.side*(PITCH_X - LAW.PITCH.goalAreaDepth*0.5), z: 0 });
+        afterBall(dt); return;
+      }
+      if (G.lastRestart && !LAW.canScoreDirectly(G.lastRestart)) {
+        toast('NO GOAL - ' + (LAW.RESTART_TEXT[G.lastRestart] || ''));
+        awardRestart({ type: LAW.RESTART.GOAL_KICK, team: 1-scorer,
+                       x: gc.side*(PITCH_X - LAW.PITCH.goalAreaDepth*0.5), z: 0 });
+        afterBall(dt); return;
+      }
+      const flag = offsideByVision(scorer);
+      if (flag) {
+        G.counts.offside++;
+        toast('OFFSIDE - NO GOAL'); setRef('OFFSIDE');
+        awardRestart({ type: LAW.RESTART.INDIRECT, team: 1-scorer, x: flag.x, z: flag.z });
+        afterBall(dt); return;
+      }
+      G.score[scorer]++;
+      if (G.advantage) { G.advantage = null; G.counts.advantagePlayed++; }
+      toast('GOAL'); setRef('GOAL');
+      resetPositions(1-scorer);
+      return;
+    }
   }
+
+  // ---- out of play. Which restart it is, is Law 15, 16 or 17, and none of them is decided
+  // here: the position and the last touch go to the rules layer and a decision comes back.
+  {
+    const lt = ball.lastTouch;
+    const dec = LAW.restartForOut({ x: ball.pos.x, z: ball.pos.z,
+                                    lastTouchTeam: lt ? lt.team : null,
+                                    lastTouchDir:  lt ? lt.dir  : 1 });
+    if (dec.type) {
+      if (dec.type === LAW.RESTART.CORNER) {
+        const c = LAW.cornerSpot(Math.sign(dec.x) || 1, Math.sign(dec.z) || 1);
+        dec.x = c.x; dec.z = c.z;
+      }
+      awardRestart(dec);
+      afterBall(dt); return;
+    }
+  }
+
+  // ---- a ball nobody is playing. Law 8: after a while the referee stops it and drops it.
+  if (!ball.owner && ball.vel.length() < 0.35) ball.still += dt; else ball.still = 0;
+  if (ball.still > 6) {
+    ball.still = 0;
+    const lt = ball.lastTouch;
+    const dec = LAW.droppedBall({ x: ball.pos.x, z: ball.pos.z,
+                                  lastTouchTeam: lt ? lt.team : 0,
+                                  teams: [{team:0, dir: teams[0][0].dir},
+                                          {team:1, dir: teams[1][0].dir}] });
+    toast('DROPPED BALL');
+    awardRestart(dec);
+    afterBall(dt); return;
+  }
+
+  afterBall(dt);
+}
+
+// Everything that has to happen once a step whichever way the ball went. It is a function
+// rather than the tail of step() because step() now returns early in eight places, and a
+// statistic that is only counted on the paths somebody remembered is not a statistic.
+function afterBall(dt){
+  keeperLaws(dt);
+  pollAdvantage();
 
   // possession statistics
   if (ball.owner) { G.posCount[ball.owner.team] += dt; G.possession = ball.owner.team; }
@@ -866,6 +1443,15 @@ function updateHUD(dt){
   el('tSh').textContent = G.shots[0] + ' - ' + G.shots[1];
   el('tBall').textContent = ball.vel.length().toFixed(1);
   el('tFps').textContent = G.fps ? G.fps.toFixed(0) : '--';
+  // The restart tally, so the Laws are visible on the screen and not only in the code. The
+  // short forms are the ones a scoreboard uses: throw ins, corners, goal kicks, free kicks.
+  const ct = G.counts;
+  el('tRes').textContent =
+    'TI ' + ct.throwIn + '  CK ' + ct.cornerKick + '  GK ' + ct.goalKick +
+    '  FK ' + (ct.directFreeKick + ct.indirectFreeKick) +
+    (ct.penaltyKick ? '  PK ' + ct.penaltyKick : '');
+  el('tOff').textContent =
+    ct.offside + (ct.advantagePlayed ? '   ADV ' + ct.advantagePlayed : '');
   const c = G.controlled;
   const gx = c.dir*PITCH_X;
   const dGoal = Math.hypot(gx-c.pos.x, c.pos.y);
@@ -881,6 +1467,31 @@ const marker = new THREE.Mesh(new THREE.RingGeometry(0.52, 0.68, 22),
   new THREE.MeshBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.95,
                                side:THREE.DoubleSide}));
 marker.rotation.x = -Math.PI/2; marker.position.y = 0.03; scene.add(marker);
+
+// The offside line, drawn across the pitch for a moment after every pass. It is the rules
+// layer's own number - line.x, straight out of offsideLine() - and not a second calculation
+// done for the picture. A graphic that agrees with the referee only by coincidence is worse
+// than no graphic, because it looks like proof.
+const offsideMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.22, PITCH_Z*2),
+  new THREE.MeshBasicMaterial({color:0xfacc15, transparent:true, opacity:0.55,
+                               side:THREE.DoubleSide, depthWrite:false}));
+// ONE rotation, not two. Laying the plane flat with rotation.x maps its long axis onto world
+// z, which is across the width of the pitch - which is what an offside line is. A second
+// rotation about z turned it back through ninety degrees, so the line ran the LENGTH of the
+// pitch and pointed at the goal. It was the right number drawn along the wrong axis, and only
+// looking at the picture showed it.
+offsideMesh.rotation.x = -Math.PI/2;
+offsideMesh.position.y = 0.04; offsideMesh.visible = false;
+scene.add(offsideMesh);
+let offsideShownUntil = 0;
+function showOffsideLine(line, flagged){
+  if (!line || Math.abs(line.x) >= PITCH_X) { hideOffsideLine(); return; }
+  offsideMesh.position.x = line.x;
+  offsideMesh.material.color.setHex(flagged ? 0xf87171 : 0xfacc15);
+  offsideMesh.visible = true;
+  offsideShownUntil = G.t + 1.4;
+}
+function hideOffsideLine(){ offsideMesh.visible = false; offsideShownUntil = 0; }
 
 // ---------------------------------------------------------------------------- loop
 let last = performance.now(), acc = 0, frames = 0, fpsT = 0;
@@ -899,6 +1510,7 @@ function frame(now){
   }
   marker.position.set(G.controlled.pos.x, 0.03, G.controlled.pos.y);
   marker.visible = G.running && !G.controlled.off;
+  if (offsideMesh.visible && (G.t > offsideShownUntil || !G.running)) hideOffsideLine();
   ballMesh.position.copy(ball.pos);
   ballMesh.rotation.x += ball.vel.z*0.06; ballMesh.rotation.z -= ball.vel.x*0.06;
   ballShadow.position.set(ball.pos.x, 0.02, ball.pos.z);
@@ -914,7 +1526,8 @@ function startMatch(){
   G.running = true; G.paused = false; G.over = false;
   G.half = 1; G.t = 0; G.score = [0,0]; G.shots = [0,0];
   G.cards = {g:0,y:0,r:0,b:0}; G.posCount = [1,1];
-  for (const p of all) { p.off = false; p.cards = 0; p.stamina = 1;
+  for (const k in G.counts) G.counts[k] = 0;
+  for (const p of all) { p.off = false; p.cards = 0; p.stamina = 1; p.holding = 0;
                          p.rig.root.visible = true; }
   resetPositions(0);
   document.getElementById('start').style.display = 'none';
@@ -937,16 +1550,53 @@ window.__game = {
   start: startMatch,
   state: () => ({running:G.running, half:G.half, t:G.t, score:G.score.slice(),
                  shots:G.shots.slice(), fps:G.fps, cards:{...G.cards},
+                 counts:{...G.counts},
+                 ref:G.refText,
+                 dead: G.dead ? {type:G.dead.type, team:G.dead.team, x:G.dead.x, z:G.dead.z,
+                                 taker:G.dead.taker ? G.dead.taker.uid : null,
+                                 wall:G.dead.wall.length, text:G.dead.text} : null,
+                 lastRestart: G.lastRestart,
+                 lastRestartMinOpp: G.lastRestartMinOpp,
+                 awaitSecondTouch: G.awaitSecondTouch,
+                 advantage: G.advantage ? {openedAt:G.advantage.openedAt,
+                                           type:G.advantage.foul.type} : null,
+                 offside: G.offside ? {line:G.offside.line.x, byTeam:G.offside.byTeam,
+                                       flagged:G.offside.flagged.map(f => f.id)} : null,
                  controlled:{name:G.controlled.name, team:G.controlled.team,
                              x:G.controlled.pos.x, z:G.controlled.pos.y},
                  ball:{x:ball.pos.x, y:ball.pos.y, z:ball.pos.z,
                        vx:ball.vel.x, vy:ball.vel.y, vz:ball.vel.z,
                        owner:ball.owner ? ball.owner.name : null,
-                       ownerTeam:ball.owner ? ball.owner.team : null}}),
+                       ownerTeam:ball.owner ? ball.owner.team : null,
+                       ownerUid:ball.owner ? ball.owner.uid : null}}),
   setBall: (x,z,vx,vz,vy) => { ball.owner = null; ball.free = 0.3;
                                ball.pos.set(x, 0.11, z);
                                ball.vel.set(vx||0, vy||0, vz||0); },
-  giveBall: (team, idx) => { ball.owner = teams[team][idx]; ball.free = 0; },
+  giveBall: (team, idx) => { ball.owner = teams[team][idx]; ball.free = 0;
+                             ball.lastTouch = teams[team][idx]; },
+
+  // ---- hooks for the Laws. A check has to be able to BUILD a situation, not wait for one to
+  // turn up: an offside pass and a penalty happen a few times an hour, and a test that waits
+  // for one is a test that usually does not run.
+  laws: LAW,
+  place: (team, idx, x, z) => { const p = teams[team][idx];
+                                p.pos.set(x, z); p.vel.set(0,0); return p.uid; },
+  clearDead: () => { G.dead = null; G.offside = null; G.advantage = null;
+                     G.awaitSecondTouch = false; G.lastRestart = null; },
+  // Plays the ball from one named player towards a point, which is what a pass IS as far as
+  // Law 11 is concerned - the snapshot is taken inside kickBall and cannot be bypassed.
+  passFrom: (team, idx, tx, tz, power) => {
+    const p = teams[team][idx];
+    ball.owner = p; p.cooldown = 0;
+    ball.pos.set(p.pos.x, 0.11, p.pos.y);
+    kickBall(p, tx - p.pos.x, tz - p.pos.y, power === undefined ? 18 : power, 0.4);
+    return G.offside ? G.offside.flagged.map(f => f.id) : [];
+  },
+  award: (dec) => awardRestart(dec),
+  foulNow: (offTeam, offIdx, vicTeam, vicIdx) =>
+    foul(teams[offTeam][offIdx], teams[vicTeam][vicIdx]),
+  holdBall: (team, seconds) => { const gk = teams[team][0];
+                                 ball.owner = gk; gk.holding = seconds; },
   legAngles: () => G.controlled.rig.legs.map(L => +L.hip.rotation.x.toFixed(4)),
   // Runs the gait alone at a fixed speed on a scratch rig and reports how far the hip swings.
   // This is the claim "cadence and stride come from the speed" reduced to one number.
@@ -967,6 +1617,16 @@ window.__game = {
   // An earlier version of the movement check did not do this and measured the displacement
   // between two DIFFERENT players, which reads as the controls being wired backwards.
   lockControl: (on) => { G.autoSwitch = !on; },
+  autoPlay: (on) => { G.autoPlay = !!on; },
+  // Freezes the animation loop while a check BUILDS a situation. Each call from the outside
+  // takes a few milliseconds of real time, and the match carries on between them: an earlier
+  // version of the offside checks placed a back four on x = 10 and then measured the line at
+  // 10.78, because the defenders had jogged forward while the placements were being made.
+  // advance() still works while paused, because it drives step() directly.
+  pause: (on) => { G.paused = !!on; },
+  // Where the offside line is DRAWN, so a check can prove the graphic and the referee are
+  // reading one number rather than two that happen to agree today.
+  offsideLineX: () => offsideMesh.visible ? +offsideMesh.position.x.toFixed(4) : null,
 };
 </script>
 </body>

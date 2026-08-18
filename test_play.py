@@ -39,6 +39,330 @@ def near(a, b, tol):
     return abs(a - b) <= tol
 
 
+def laws_checks(page):
+    """The Laws, checked inside the running game rather than only in the rules module.
+
+    laws.js has its own 131 checks under node with no browser present. Those prove the rules are
+    RIGHT. They cannot prove the game ASKS them, or asks them with the right arguments, or does
+    what the answer says - which is where a rules engine usually goes wrong. So everything here
+    builds a situation on the pitch and then reads the referee's decision back out.
+
+    Situations are built rather than waited for. An offside pass, a penalty and a six second
+    offence happen a few times an hour in an ordinary match, and a check that waits for one is a
+    check that usually does not run.
+    """
+    ev = page.evaluate
+    clear = lambda: ev("() => window.__game.clearDead()")
+    # The match is frozen for the whole of this section. Each call from Python costs a few
+    # milliseconds of wall clock, and without this the game plays on between them - which is
+    # exactly how a back four placed on x = 10 came to be measured at x = 10.78.
+    ev("() => window.__game.pause(true)")
+    st = lambda: ev("() => window.__game.state()")
+
+    print("\n  the Laws, inside the running game")
+
+    # --- the page and the rules module are the same code
+    chk(ev("() => !!window.__game.laws && !!window.__game.laws.LAWS_VERSION"),
+        "the page is running the rules module: %s"
+        % ev("() => window.__game.laws.LAWS_VERSION"))
+    chk(ev("() => window.__game.laws.LAWS.freeKickDistance") == 9.15,
+        "and reads 9.15 m for a free kick out of it, not out of the game code")
+
+    # --- Law 15: over the touchline is a throw in to the other side, taken from where it went
+    clear()
+    ev("() => window.__game.giveBall(0, 5)")          # a team 0 player touched it last
+    ev("() => window.__game.setBall(12, 30, 0, 45, 0)")
+    ev("() => window.__game.advance(0.4)")
+    d = st()["dead"]
+    chk(d is not None and d["type"] == "throwIn", "a ball over the touchline is a throw in")
+    chk(d and d["team"] == 1, "to the opponents of whoever touched it last")
+    chk(d and near(abs(d["z"]), 34, 0.01),
+        "placed on the line (z %.2f)" % (d["z"] if d else -1))
+    # and it is actually TAKEN - a restart that never resolves would freeze the match
+    ev("() => window.__game.advance(6)")
+    chk(st()["dead"] is None, "and after six seconds the ball is live again")
+
+    # --- Law 17: over the goal line off a defender is a corner, in the right corner
+    clear()
+    ev("() => window.__game.giveBall(0, 3)")          # team 0 defends -x, so this is a defender
+    ev("() => window.__game.setBall(-51, 12, -30, 0, 0)")
+    ev("() => window.__game.advance(0.4)")
+    d = st()["dead"]
+    chk(d is not None and d["type"] == "cornerKick",
+        "a defender putting it behind is a corner (%s)" % (d and d["type"]))
+    chk(d and d["x"] < 0 and d["z"] > 0,
+        "in the corner it went out at (%.1f, %.1f)" % (d["x"], d["z"]) if d else "no restart")
+    chk(d and d["team"] == 1, "to the attacking side")
+
+    # --- Law 16: over the same line off an attacker is a goal kick to the defenders
+    clear()
+    ev("() => window.__game.giveBall(1, 9)")          # team 1 attacks -x, so an attacker there
+    ev("() => window.__game.setBall(-51, 12, -30, 0, 0)")
+    ev("() => window.__game.advance(0.4)")
+    d = st()["dead"]
+    chk(d is not None and d["type"] == "goalKick",
+        "an attacker putting it behind is a goal kick (%s)" % (d and d["type"]))
+    chk(d and d["team"] == 0, "to the defending side")
+    chk(d and d["taker"] == 0, "and the taker is that side's goalkeeper (uid %s)"
+        % (d and d["taker"]))
+
+    # --- Law 11, the whole flag decision, built on the pitch.
+    # Team 0 attacks +x. Its defence is left deep, team 1's back line is put on x = 10 and wide,
+    # the keeper on his line. The passer is on the halfway line.
+    def setup_offside(receiver_x):
+        clear()
+        ev("() => window.__game.autoPlay(false)")
+        ev("() => window.__game.lockControl(true)")
+        for i in range(1, 11):
+            ev("() => window.__game.place(0, %d, -40, %d)" % (i, (i - 5) * 5))
+        ev("() => window.__game.place(1, 0, 50, 0)")
+        for i in range(1, 11):
+            ev("() => window.__game.place(1, %d, 10, %d)" % (i, 15 if i % 2 else -15))
+        ev("() => window.__game.place(0, 5, 0, 0)")               # the passer
+        ev("() => window.__game.place(0, 9, %d, 0)" % receiver_x)  # the man being played in
+        flagged = ev("() => window.__game.passFrom(0, 5, %d, 0, 18)" % receiver_x)
+        # The passer is walked away AFTER the ball has gone. He starts nearest to it, so the
+        # pressing logic sent him chasing his own pass and he collected it himself at x = 16 -
+        # correctly no offence, and a check that measures nothing. The snapshot was taken at the
+        # instant of the kick and moving him now cannot change it.
+        ev("() => window.__game.place(0, 5, -45, 22)")
+        return flagged
+
+    flagged = setup_offside(20)
+    chk(9 in flagged,
+        "a forward beyond the last two defenders is flagged at the moment of the pass (%s)"
+        % flagged)
+    chk(ev("() => window.__game.state().offside.line") == 10,
+        "and the line is drawn on the second last opponent, x = %s"
+        % ev("() => window.__game.state().offside.line"))
+    chk(ev("() => window.__game.offsideLineX()") == 10,
+        "the line on the screen is the SAME number the referee used")
+    before = st()["counts"]["offside"]
+    ev("() => window.__game.advance(2.5)")
+    after = st()
+    chk(after["counts"]["offside"] == before + 1,
+        "when he takes it, offside is given (%d -> %d)"
+        % (before, after["counts"]["offside"]))
+    chk(after["dead"] and after["dead"]["type"] == "indirectFreeKick",
+        "and the restart is an indirect free kick (%s)"
+        % (after["dead"] and after["dead"]["type"]))
+    chk(after["dead"] and after["dead"]["team"] == 1, "to the defending side")
+
+    # The other side of the same line. This is the check that a rule written only for "yes"
+    # cannot pass: the identical pass to a man BEHIND the defence must be waved on.
+    flagged = setup_offside(5)
+    chk(9 not in flagged,
+        "the same pass to a forward behind that line flags nobody (%s)" % flagged)
+    before = st()["counts"]["offside"]
+    ev("() => window.__game.advance(2.5)")
+    chk(st()["counts"]["offside"] == before,
+        "and no offside is given (%d)" % st()["counts"]["offside"])
+
+    # Level with the second last opponent is ONSIDE - the word in the Law is "nearer than".
+    flagged = setup_offside(10)
+    chk(9 not in flagged, "level with the second last opponent is onside (%s)" % flagged)
+
+    # A player cannot be offside from HIS OWN pass. The passer is put beyond the defence here,
+    # so if he were in the list at all he would be flagged - which is how this check can tell
+    # the difference between "the passer is excluded" and "the passer happened to be onside".
+    clear()
+    ev("() => window.__game.autoPlay(false)")
+    for i in range(1, 11):
+        ev("() => window.__game.place(0, %d, -40, %d)" % (i, (i - 5) * 5))
+    ev("() => window.__game.place(1, 0, 50, 0)")
+    for i in range(1, 11):
+        ev("() => window.__game.place(1, %d, 10, %d)" % (i, 15 if i % 2 else -15))
+    ev("() => window.__game.place(0, 5, 25, 0)")      # the passer, well beyond the defence
+    ev("() => window.__game.place(0, 9, 35, 2)")      # a team mate, further beyond it still
+    flagged = ev("() => window.__game.passFrom(0, 5, 35, 2, 16)")
+    chk(5 not in flagged,
+        "a man in an offside position who plays the ball himself is not flagged (%s)" % flagged)
+    chk(9 in flagged, "but his team mate ahead of the ball is (%s)" % flagged)
+
+    # And the line follows THE BALL when the ball is the further forward of the two. A pass
+    # played from ahead of the defence cannot put anybody behind it offside.
+    clear()
+    for i in range(1, 11):
+        ev("() => window.__game.place(1, %d, 10, %d)" % (i, 15 if i % 2 else -15))
+    ev("() => window.__game.place(1, 0, 50, 0)")
+    ev("() => window.__game.place(0, 5, 30, 0)")      # the ball is played from x = 30
+    ev("() => window.__game.place(0, 9, 25, 3)")      # past the defence, behind the ball
+    flagged = ev("() => window.__game.passFrom(0, 5, 25, 3, 16)")
+    chk(9 not in flagged,
+        "a man past the defence but behind the ball is onside (%s)" % flagged)
+    chk(ev("() => window.__game.state().offside.line") == 30,
+        "because the line is on the ball, at x = %s"
+        % ev("() => window.__game.state().offside.line"))
+
+    # --- a player standing exactly on the ball.
+    # Dividing a direction by its own length is how a NaN gets into a football match, and the
+    # length is zero exactly when a player is standing on the thing he is running at. This
+    # happened for real to a centre back after a free kick and the only symptom was that he
+    # disappeared from the pitch. One frame is enough to catch it.
+    clear()
+    ev("() => window.__game.autoPlay(true)")
+    ev("() => window.__game.setBall(0, 0, 0, 0, 0)")
+    ev("() => window.__game.place(1, 6, 0, 0)")
+    ev("() => window.__game.advance(1/60)")
+    fin = ev("() => { const p = window.__game.teams[1][6];"
+             " return Number.isFinite(p.pos.x) && Number.isFinite(p.pos.y) &&"
+             " Number.isFinite(p.vel.x) && Number.isFinite(p.vel.y); }")
+    chk(fin, "a player standing exactly on the ball still has real coordinates a frame later")
+
+    # --- Law 12: a foul in the penalty area is a penalty, the same foul outside it is not.
+    # Team 1 attacks -x, so team 1 DEFENDS +x and its penalty area runs from x = 36 to 52.5.
+    clear()
+    ev("() => window.__game.giveBall(1, 5)")
+    ev("() => window.__game.place(1, 2, 42, 3)")
+    ev("() => window.__game.place(0, 9, 42, 3)")
+    ev("() => window.__game.foulNow(1, 2, 0, 9)")
+    d = st()["dead"]
+    chk(d is not None and d["type"] == "penaltyKick",
+        "a defender's foul inside his own area is a penalty (%s)" % (d and d["type"]))
+    chk(d and near(d["x"], 41.5, 0.01) and near(d["z"], 0, 0.01),
+        "taken from the mark, 11 m out and central (%.2f, %.2f)"
+        % (d["x"], d["z"]) if d else "no restart")
+    chk(d and d["team"] == 0, "to the side that was fouled")
+
+    clear()
+    ev("() => window.__game.giveBall(1, 5)")
+    ev("() => window.__game.place(1, 2, 20, 3)")
+    ev("() => window.__game.place(0, 9, 20, 3)")
+    ev("() => window.__game.foulNow(1, 2, 0, 9)")
+    d = st()["dead"]
+    chk(d is not None and d["type"] == "directFreeKick",
+        "the same foul in midfield is a direct free kick (%s)" % (d and d["type"]))
+    chk(d and near(d["x"], 20, 0.5), "taken where the foul was (%.1f)" % (d["x"] if d else -99))
+
+    # --- Law 13: the wall stands at 9.15 m, measured on the pitch and not in the constant
+    clear()
+    ev("() => window.__game.autoPlay(true)")     # the Law binds the players, not the person
+    ev("() => window.__game.award({type:'directFreeKick', team:0, x:30, z:0})")
+    d = st()["dead"]
+    chk(d and d["wall"] == 4, "a free kick 22 m out gets a wall of four (%s)" % (d and d["wall"]))
+    # Measured AT THE MOMENT THE KICK IS TAKEN, not at some convenient time before it. The
+    # question the Law asks is where the opponents were when the ball was played; a wall that
+    # reaches 9.15 m two seconds later has not complied with anything.
+    dmin = ev("""() => {
+        const g = window.__game;
+        for (let i = 0; i < 60*10 && g.G.dead; i++) g.advance(1/60);
+        return g.G.lastRestartMinOpp;
+    }""")
+    chk(dmin >= 9.15,
+        "and when the kick is taken the nearest defender is %.2f m away, outside 9.15" % dmin)
+
+    # --- Law 12: the goalkeeper's six seconds
+    clear()
+    before = st()["counts"]["indirectFreeKick"]
+    ev("() => window.__game.holdBall(0, 5.5)")
+    ev("() => window.__game.advance(0.3)")
+    chk(st()["counts"]["indirectFreeKick"] == before,
+        "five and a half seconds in the keeper's hands is allowed")
+    ev("() => window.__game.advance(0.8)")
+    d = st()
+    chk(d["counts"]["indirectFreeKick"] == before + 1,
+        "six and a bit is an indirect free kick (%d -> %d)"
+        % (before, d["counts"]["indirectFreeKick"]))
+    chk(d["dead"] and d["dead"]["team"] == 1, "to the other side")
+
+    # --- Law 13: a goal cannot be scored directly from an indirect free kick
+    clear()
+    ev("() => window.__game.award({type:'indirectFreeKick', team:0, x:-20, z:0})")
+    ev("() => window.__game.advance(2.2)")
+    chk(st()["awaitSecondTouch"] is True,
+        "after an indirect free kick the game is waiting for a second touch")
+    s_before = st()["score"]
+    ev("() => window.__game.setBall(50.5, 0.4, 26, 0, 0)")
+    ev("() => window.__game.advance(0.5)")
+    s_after = st()
+    chk(s_after["score"] == s_before,
+        "so a ball that goes straight in is NOT a goal (%s -> %s)"
+        % (s_before, s_after["score"]))
+    chk(s_after["dead"] and s_after["dead"]["type"] == "goalKick",
+        "and the restart is a goal kick (%s)"
+        % (s_after["dead"] and s_after["dead"]["type"]))
+
+    # --- Law 8: a dropped ball inside the area goes to that keeper
+    clear()
+    ev("() => window.__game.award({type:'droppedBall', team:0, x:-45, z:2,"
+       " toGoalkeeper:true})")
+    d = st()["dead"]
+    chk(d and d["taker"] == 0, "a dropped ball in the area goes to the keeper (uid %s)"
+        % (d and d["taker"]))
+
+    # --- the goalkeepers defend the goal BEHIND them.
+    # This is here because they did not: the AI sent both of them to the opposition goal line
+    # within fifteen seconds, and nothing failed because no check had ever measured a keeper's
+    # x. Seven goals from nine shots was the only symptom.
+    clear()
+    ev("() => window.__game.autoPlay(true)")
+    ev("() => window.__game.advance(45)")
+    gks = ev("() => [window.__game.teams[0][0].pos.x, window.__game.teams[1][0].pos.x]")
+    chk(gks[0] < -30, "after 45 seconds the ATL keeper is still at his own end (%.1f)" % gks[0])
+    chk(gks[1] > 30, "and the ORB keeper at his (%.1f)" % gks[1])
+
+    # --- attract mode: the engine plays both sides, and the Laws keep firing while it does
+    ev("() => window.__game.advance(180)")
+    c = st()["counts"]
+    fired = [k for k in ("throwIn", "goalKick", "cornerKick", "directFreeKick",
+                         "indirectFreeKick", "offside") if c[k] > 0]
+    chk(len(fired) >= 4,
+        "in four unattended minutes the engine produced %d kinds of restart: %s"
+        % (len(fired), ", ".join(fired)))
+    # A save is CONSTRUCTED rather than waited for. An earlier version asserted that some
+    # saves had happened in four unattended minutes, which is a statement about that match and
+    # not about the code: the same check passed with one save and failed with none.
+    clear()
+    ev("() => window.__game.pause(true)")
+    ev("() => window.__game.autoPlay(true)")
+    for i in range(1, 11):                            # both sides out of the way
+        ev("() => window.__game.place(0, %d, -30, %d)" % (i, (i - 5) * 6))
+        ev("() => window.__game.place(1, %d, 20, %d)" % (i, (i - 5) * 6 + 3))
+    ev("() => window.__game.place(1, 0, 51.3, 0)")     # the ORB keeper on his line
+    before_s = st()["counts"]["saves"]
+    # Struck from 38 m out at 30 m/s. Two earlier versions of this check failed for two
+    # different reasons and neither was a bug in the game. From 46 m the ball crossed the line
+    # inside the fifth of a second during which setBall lets nobody touch it. From 38 m at
+    # 24 m/s it arrived at 12.8 m/s, just under the 13 m/s above which a keeper parries rather
+    # than gathers - so it was correctly collected, and the check was right about the number
+    # and wrong about the reason.
+    ev("() => window.__game.setBall(38, 0, 30, 0, 0)")
+    ev("() => window.__game.advance(0.75)")
+    after_s = st()
+    chk(after_s["counts"]["saves"] == before_s + 1,
+        "a shot driven at the keeper is SAVED, not collected (%d -> %d)"
+        % (before_s, after_s["counts"]["saves"]))
+    chk(after_s["ball"]["owner"] is None,
+        "the ball is parried rather than picked up, so it stays live")
+    chk(ev("() => window.__game.ball.fromSave") is True,
+        "and it is marked as having come off a save, which Law 11 needs")
+    chk(c["saves"] >= 0, "the unattended match also recorded %d saves" % c["saves"])
+
+    # --- and nobody has quietly turned into a NaN.
+    # A player was doing exactly that at 17.7 seconds of an unattended match: takeRestart used
+    # to place the taker on the exact spot of the ball, so on the next frame his distance to it
+    # was zero, the direction was 0/0, and the position went to NaN and stayed there. Nothing
+    # threw, nothing was logged, and the only symptom was one player disappearing. So this now
+    # runs long and asserts on every coordinate rather than on the ball alone.
+    bad_p = ev("""() => {
+        const g = window.__game;
+        const b = g.all.filter(p => !Number.isFinite(p.pos.x) || !Number.isFinite(p.pos.y) ||
+                                    !Number.isFinite(p.vel.x) || !Number.isFinite(p.vel.y));
+        return b.map(p => p.name + ' of team ' + p.team);
+    }""")
+    chk(bad_p == [],
+        "after four unattended minutes all 22 players still have real coordinates%s"
+        % ("" if not bad_p else " - " + str(bad_p)))
+    bfin = ev("""() => { const b = window.__game.ball;
+        return ['x','y','z'].every(k => Number.isFinite(b.pos[k])) &&
+               ['x','y','z'].every(k => Number.isFinite(b.vel[k])); }""")
+    chk(bfin, "and so does the ball")
+    ev("() => window.__game.autoPlay(false)")
+    ev("() => window.__game.lockControl(false)")
+    ev("() => window.__game.pause(false)")
+    clear()
+
+
 def run(url, label, mobile=False):
     print("\n  " + label)
     errs = []
@@ -141,6 +465,7 @@ def run(url, label, mobile=False):
         chk(abs(s1["ball"]["x"]) < 2 and abs(s1["ball"]["z"]) < 2,
             "and the ball is back on the centre spot")
 
+        page.evaluate("() => window.__game.clearDead()")
         s2 = page.evaluate("() => window.__game.state().score")
         page.evaluate("() => window.__game.setBall(-50.5, -0.6, -26, 0, 0)")
         page.evaluate("() => window.__game.advance(0.6)")
@@ -148,6 +473,7 @@ def run(url, label, mobile=False):
         chk(s3[1] == s2[1] + 1, "and it works at the other end too (%s -> %s)" % (s2, s3))
 
         # --- a ball wide of the post is NOT a goal
+        page.evaluate("() => window.__game.clearDead()")
         s4 = page.evaluate("() => window.__game.state().score")
         page.evaluate("() => window.__game.setBall(50.5, 6.0, 26, 0, 0)")
         page.evaluate("() => window.__game.advance(0.6)")
@@ -155,6 +481,7 @@ def run(url, label, mobile=False):
         chk(s5 == s4, "a ball wide of the post is not a goal (%s)" % (s5,))
 
         # --- and one over the bar is not either
+        page.evaluate("() => window.__game.clearDead()")
         s6 = page.evaluate("() => window.__game.state().score")
         page.evaluate("() => window.__game.setBall(48.0, 0.0, 26, 0, 26)")
         page.evaluate("() => window.__game.advance(0.5)")
@@ -166,6 +493,7 @@ def run(url, label, mobile=False):
         # true with the post collision deleted - the ball simply flew out for a goal kick and
         # was placed back on the pitch. What has to be asserted is that it came BACK: the
         # x velocity must reverse.
+        page.evaluate("() => window.__game.clearDead()")
         s8 = page.evaluate("() => window.__game.state().score")
         page.evaluate("() => window.__game.setBall(52.2, 3.74, 22, 0, 0)")
         page.evaluate("() => window.__game.advance(0.05)")
@@ -176,9 +504,14 @@ def run(url, label, mobile=False):
         chk(s9["ball"]["x"] < 52.5,
             "leaving the ball back in front of the line (x %.2f)" % s9["ball"]["x"])
 
-        # --- but six centimetres the other side of the post IS a goal
+        # --- but sixteen centimetres the other side of the post IS a goal.
+        # The aperture is the goal minus a ball's radius at each side, because Law 9 wants the
+        # WHOLE ball over the line: the posts are 3.66 m off centre, so the last z that can
+        # score is 3.55. This number moved when the whole-ball rule went in, which is the point
+        # of writing it down here rather than leaving it implied.
+        page.evaluate("() => window.__game.clearDead()")
         s8b = page.evaluate("() => window.__game.state().score")
-        page.evaluate("() => window.__game.setBall(50.0, 3.58, 22, 0, 0)")
+        page.evaluate("() => window.__game.setBall(50.0, 3.40, 22, 0, 0)")
         page.evaluate("() => window.__game.advance(0.4)")
         s9b = page.evaluate("() => window.__game.state().score")
         chk(s9b[0] == s8b[0] + 1,
@@ -186,14 +519,17 @@ def run(url, label, mobile=False):
 
         # --- a fast diagonal shot is judged where it CROSSED the line, not where it happened
         # --- to be when the next frame was drawn. Sampling once a frame calls this one wide.
-        #     crossing z = 3.50 (inside the post), sampled z one frame later = 4.40 (outside)
+        #     crossing z = 3.53 (inside), sampled z one frame later = 3.82 (outside the post)
+        page.evaluate("() => window.__game.clearDead()")
         s10 = page.evaluate("() => window.__game.state().score")
-        page.evaluate("() => window.__game.setBall(52.45, 3.40, 30, 60, 0)")
+        page.evaluate("() => window.__game.setBall(52.45, 3.40, 30, 25, 0)")
         page.evaluate("() => window.__game.advance(0.05)")
         s11 = page.evaluate("() => window.__game.state().score")
         chk(s11[0] == s10[0] + 1,
             "a shot that crossed the line inside the post is a goal even though it was "
             "outside it a frame later (%s -> %s)" % (s10, s11))
+
+        laws_checks(page)
 
         # --- possession changes hands and the ball is never lost
         page.evaluate("() => window.__game.advance(20)")
@@ -250,11 +586,37 @@ def run(url, label, mobile=False):
         browser.close()
 
 
+def run_laws_only(url):
+    """Only the Laws section, for the mutation runner - the rest of the suite is unaffected
+    by a change to a rule and running it thirty times over would say nothing new."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-gl=swiftshader",
+                                          "--enable-unsafe-swiftshader"])
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
+        errs = []
+        page.on("pageerror", lambda e: errs.append("pageerror: " + str(e)))
+        page.goto(url, wait_until="networkidle", timeout=90000)
+        page.wait_for_function("() => !!window.__game", timeout=30000)
+        page.click("#go")
+        time.sleep(0.8)
+        laws_checks(page)
+        chk(not errs, "no console error during the Laws checks%s"
+            % ("" if not errs else " - " + str(errs[:2])))
+        browser.close()
+
+
 def main():
-    url = sys.argv[1] if len(sys.argv) > 1 else (HERE / "play.html").as_uri()
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    url = args[0] if args else (HERE / "play.html").as_uri()
     print("=" * 64)
     print("checks on the playable match")
     print("=" * 64)
+    if "--laws" in sys.argv:
+        run_laws_only(url)
+        print("\n" + "=" * 64)
+        print("  %d checks, %d passed, %d failed" % (PASS[0] + FAIL[0], PASS[0], FAIL[0]))
+        print("=" * 64)
+        return 1 if FAIL[0] else 0
     run(url, "desktop, keyboard")
     run(url, "phone viewport, touch", mobile=True)
     print("\n" + "=" * 64)
