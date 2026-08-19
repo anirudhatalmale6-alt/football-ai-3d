@@ -146,6 +146,7 @@
     <div class="row"><span>FPS</span><b id="tFps">--</b></div>
     <div class="row"><span>RESTARTS</span><b id="tRes">--</b></div>
     <div class="row"><span>OFFSIDE</span><b id="tOff">0</b></div>
+    <div class="row"><span>RULES</span><b id="tComp">--</b></div>
   </div>
   <div class="bot">
     <div class="pan">GOAL PROBABILITY<b id="pGoal">0%</b><span class="bar"><i id="bGoal" style="width:0"></i></span></div>
@@ -168,6 +169,7 @@
 <script type="module">
 import * as THREE from 'three';
 import * as LAW from './laws.js';
+import * as PROF from './profiles.js';
 
 // ============================================================================================
 // AI2ORBIT Football AI - playable match
@@ -184,6 +186,38 @@ import * as LAW from './laws.js';
 // every referee decision below is a CALL into that module and never a comparison written here.
 // Where this file does arithmetic on the Laws, that is a defect waiting to be moved.
 // ============================================================================================
+
+// ============================================================================================
+// WHICH COMPETITION THIS MATCH IS BEING PLAYED UNDER
+//
+// Every competition plays the same Laws; what differs is the competition's own regulations, and
+// profiles.js holds those as a thin layer of fields rather than as a second copy of the rules.
+// The profile is resolved once, here, and then HANDED to the same functions in laws.js that an
+// unmodified match uses. Nothing below branches on the competition, and laws.js does not know
+// this file read a URL - which is what "the competitions differ without forking the rules" has
+// to mean in code.
+//
+//   play.html                                   the Laws as published
+//   play.html?competition=uefa&context=knockoutExtraTimeThenKicks
+//   play.html?competition=uefa&tolerance=0.10   a published offside tolerance, applied live
+//
+// The tolerance parameter is here because it is the one competition field that changes what you
+// SEE: the offside line moves and a marginal pass is given the other way. An unknown competition
+// name falls back to the Laws rather than throwing, because a bad link should still play.
+const Q = new URLSearchParams(location.search);
+let PROFILE;
+try {
+  const over = {};
+  if (Q.has('tolerance')) over.levelToleranceM = parseFloat(Q.get('tolerance'));
+  PROFILE = PROF.resolve({ competition: Q.get('competition') || 'ifab',
+                           context: Q.get('context') || null,
+                           overrides: Object.keys(over).length ? over : null });
+} catch (e) {
+  PROFILE = PROF.resolve({ competition: 'ifab' });
+  PROFILE = { ...PROFILE, name: PROFILE.name + '  (asked for something this build does not have)' };
+}
+// The one object the rest of the file passes into laws.js. Shaped exactly like LAW.LAWS.
+const RULES = PROFILE.laws;
 
 const PITCH_X = 52.5, PITCH_Z = 34;          // half length, half width, in metres
 const GOAL_Z  = 3.66, GOAL_Y = 2.44;
@@ -589,6 +623,7 @@ function kickBall(p, dirX, dirZ, power, loft){
     attackers: teams[p.team].filter(q => q !== p).map(q => q.pt()),
     opponents: teams[1-p.team].map(q => q.pt()),
     ballX: p.pos.x, dir: p.dir, restartType: G.lastRestart,
+    laws: RULES,                        // the competition's tolerance, if it publishes one
   });
   G.offside.byTeam = p.team;
   G.offside.passer = p.uid;
@@ -978,7 +1013,7 @@ function judgeOffside(receiver){
   if (receiver.uid === s.passer) return false;
   const res = LAW.offsideOffence(s, { touchedBy: receiver.uid,
                                       fromRebound: ball.fromRebound,
-                                      fromSave: ball.fromSave });
+                                      fromSave: ball.fromSave }, RULES);
   G.offside = null;
   if (!res.offence) return false;
   const f = s.flagged.find(x => x.id === res.id) || { x: receiver.pos.x, z: receiver.pos.y };
@@ -1001,8 +1036,8 @@ function offsideByVision(scoringTeam){
     if (!pl || pl.off) continue;
     if (LAW.blocksVision({ player: {x: pl.pos.x, z: pl.pos.y},
                            keeper: {x: keeper.pos.x, z: keeper.pos.y},
-                           ball:   {x: ball.pos.x,  z: ball.pos.z} })) {
-      const res = LAW.offsideOffence(s, { touchedBy: null, blockedVisionOf: f.id });
+                           ball:   {x: ball.pos.x,  z: ball.pos.z}, laws: RULES })) {
+      const res = LAW.offsideOffence(s, { touchedBy: null, blockedVisionOf: f.id }, RULES);
       if (res.offence) return f;
     }
   }
@@ -1452,6 +1487,13 @@ function updateHUD(dt){
     (ct.penaltyKick ? '  PK ' + ct.penaltyKick : '');
   el('tOff').textContent =
     ct.offside + (ct.advantagePlayed ? '   ADV ' + ct.advantagePlayed : '');
+  // Which competition's regulations this match is being played under, and the one number of
+  // them that changes what is on the screen. A tolerance of zero is the Laws as written, so it
+  // is shown as such rather than as "0.00 m", which would read as a competition's choice.
+  el('tComp').textContent = PROFILE.name.toUpperCase() +
+    (RULES.levelToleranceM > 0
+       ? '  ' + (RULES.levelToleranceM * 100).toFixed(0) + ' CM'
+       : '  NO TOLERANCE');
   const c = G.controlled;
   const gx = c.dir*PITCH_X;
   const dGoal = Math.hypot(gx-c.pos.x, c.pos.y);
@@ -1548,6 +1590,13 @@ resetPositions(0);
 window.__game = {
   G, ball, teams, all,
   start: startMatch,
+  // The resolved competition profile, so a check can assert that a URL actually changed the
+  // rules the match is being played under rather than only the label on the screen.
+  profile: () => ({ id: PROFILE.id, name: PROFILE.name, body: PROFILE.body,
+                    context: PROFILE.context,
+                    lawsPublishedBy: PROFILE.lawsPublishedBy,
+                    levelToleranceM: RULES.levelToleranceM,
+                    unstated: PROFILE.unstated.slice() }),
   state: () => ({running:G.running, half:G.half, t:G.t, score:G.score.slice(),
                  shots:G.shots.slice(), fps:G.fps, cards:{...G.cards},
                  counts:{...G.counts},

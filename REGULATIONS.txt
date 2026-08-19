@@ -1,0 +1,486 @@
+================================================================
+COMPETITION REGULATIONS - WHAT IS STILL TO BE FILLED IN
+AI2ORBIT Co. 2026   football-ai-3d   profiles.js
+================================================================
+
+Every competition below plays the SAME Laws of the Game, as
+published by the IFAB. None of them writes its own Laws. What
+differs between them is the competition regulations, and the
+Laws hand those over explicitly: "competition rules must
+state...".
+
+So the engine holds one set of rules and a thin profile per
+competition. Adding a competition adds a profile; it never
+forks a rule.
+
+The fields listed under each competition have NOT been filled
+in, because that would mean typing a published regulation from
+memory. Reading one of them returns the words NOT STATED, and
+reading one through the strict wrapper throws. A field filled
+in once is used everywhere that competition is played.
+
+Generated from profiles.js. 64 columns.
+================================================================
+
+The Laws of the Game (IFAB, worldwide)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+FIFA competitions (FIFA, worldwide)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+UEFA competitions (UEFA, Europe)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+English football (The Football Association, UEFA)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+Spanish football (Real Federacion Espanola de Futbol, UEFA)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+German football (Deutscher Fussball-Bund, UEFA)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+Swedish football (Svenska Fotbollforbundet, UEFA)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+Belgian football (Royal Belgian Football Association, UEFA)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+French football (Federation Francaise de Football, UEFA)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+Canadian football (Canada Soccer, CONCACAF)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+Mexican football (Federacion Mexicana de Futbol, CONCACAF)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+United States football (United States Soccer Federation,
+CONCACAF)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+South American club football (CONMEBOL, CONMEBOL)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee
+
+Copa America (CONMEBOL, CONMEBOL)
+  plays under: the Laws of the Game, published by IFAB,
+  unchanged
+  stated here: 9 fields
+  to be filled in from the published regulations, 19 fields:
+    awayGoalsRule
+      most competitions that used it have dropped it, so neither
+      answer is a safe default
+    cautionsBeforeSuspension
+      entirely a competition matter; the Laws say nothing
+    concussionSubstitutes
+      permanent, additional, and only where the competition is
+      approved to operate the protocol
+    coolingBreaks
+    drawIsAllowed
+    drinksBreaks
+    extraTime
+    extraTimeExtraOpportunity
+    extraTimeExtraSubstitution
+    fourthOfficial
+    goalLineTechnology
+    kicksFromThePenaltyMark
+    namedSubstitutes
+      Law 3: the competition must state a number in this range
+    replayIfDrawn
+    reserveAssistantReferee
+    semiAutomatedOffside
+    substitutionsAllowed
+      up to five, except return substitutes in the football the
+      Law allows them in
+    temporaryDismissalMinutes
+    videoAssistantReferee

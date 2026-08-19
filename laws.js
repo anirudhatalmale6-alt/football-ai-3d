@@ -55,7 +55,11 @@ export const PITCH = {
 };
 
 // The numbers a competition is allowed to move sit here rather than being typed into the code,
-// because week 2 of the schedule adds a profile per competition and this is the seam it uses.
+// because a profile per competition is the seam that lets UEFA, FIFA and the rest differ from
+// each other without any of them forking a rule. Week 2 built that layer: profiles.js resolves
+// a competition into an object shaped exactly like this one, and hands it to the functions
+// below as their `laws` argument. Nothing in this file knows profiles.js exists, and it must
+// stay that way - the moment a rule here branches on a competition name, the seam is gone.
 export const LAWS = {
   freeKickDistance: 9.15,
   cornerKickDistance: 9.15,
@@ -66,7 +70,7 @@ export const LAWS = {
   // DECISION, not a Law. The Law says a player level with the second last opponent is NOT
   // offside, and states no tolerance. Positions here are point masses, so a strict comparison
   // makes a player offside by a millimetre. Zero is the Law; a competition running semi
-  // automated offside publishes its own tolerance and week 2 sets this per competition.
+  // automated offside publishes its own, and profiles.js sets it without touching this file.
   levelToleranceM: 0,
 
   // DECISION, not a Law. The Law says the referee allows play to continue for "a few seconds".
@@ -536,3 +540,5 @@ export const RESTART_TEXT = {
 };
 
 export const LAWS_VERSION = 'week 1 - Laws 8, 9, 11, 12, 13, 14, 15, 16, 17';
+// match.js carries the LAWS the MATCH is governed by (3, 5, 6, 7, 10 and the cards of 12) and
+// profiles.js carries what each competition is allowed to change. Neither is imported here.

@@ -609,6 +609,113 @@ def run_laws_only(url):
         browser.close()
 
 
+def run_profile(base):
+    """The competition profile layer, checked in the browser rather than only under node.
+
+    test_match.mjs already proves the layer resolves correctly. That is not the same claim as
+    "the game is actually played under it". This section loads the SAME page three times with
+    different query strings and checks that the rules the referee applies changed - not that a
+    label on the screen changed, which is what a wiring bug looks like from the outside.
+
+    The measurement is deliberately taken at five centimetres, because that is the only place
+    the two answers differ. A forward two metres offside is offside under every profile, so a
+    check built there would pass whether the profile reached laws.js or not.
+    """
+    print("\n  the competition profile layer, in the browser")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-gl=swiftshader",
+                                          "--enable-unsafe-swiftshader"])
+
+        def marginal(url, offsets):
+            """Place a forward a few centimetres past the second last opponent, once per
+            offset, and report which of them the referee flagged.
+
+            The match is PAUSED before anything is placed. Without that the game plays on
+            between each call from Python and the back four put on x = 10 is somewhere else
+            by the time the pass is made - which is how the first run of this section
+            reported nothing flagged at any tolerance, and would have gone on reporting a
+            clean pass for the wrong reason.
+            """
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            errs = []
+            page.on("pageerror", lambda e: errs.append("pageerror: " + str(e)))
+            page.goto(url, wait_until="networkidle", timeout=90000)
+            page.wait_for_function("() => !!window.__game", timeout=30000)
+            page.click("#go")
+            time.sleep(0.6)
+            ev = page.evaluate
+            ev("() => window.__game.pause(true)")
+            ev("() => window.__game.autoPlay(false)")
+            ev("() => window.__game.lockControl(true)")
+            out = {}
+            for off in offsets:
+                ev("() => window.__game.clearDead()")
+                for i in range(1, 11):
+                    ev("() => window.__game.place(0, %d, -40, %d)" % (i, (i - 5) * 5))
+                ev("() => window.__game.place(1, 0, 50, 0)")
+                for i in range(1, 11):
+                    ev("() => window.__game.place(1, %d, 10, %d)" % (i, 15 if i % 2 else -15))
+                ev("() => window.__game.place(0, 5, 0, 0)")
+                ev("() => window.__game.place(0, 9, %r, 0)" % (10 + off))
+                out[off] = ev("() => window.__game.passFrom(0, 5, %r, 0, 18)" % (10 + off))
+            line = ev("() => window.__game.state().offside.line")
+            prof = ev("() => window.__game.profile()")
+            hud = page.text_content("#tComp")
+            page.close()
+            return out, line, prof, hud, errs
+
+        # 1. No query string at all: the Laws exactly as published, no tolerance.
+        f, line, prof, hud, errs = marginal(base + "/play.html", [0.05, 0.15])
+        chk(prof["id"] == "ifab", "with no query string the match is played under the Laws "
+                                  "themselves (%s)" % prof["id"])
+        chk(prof["levelToleranceM"] == 0, "with no offside tolerance at all")
+        chk("NO TOLERANCE" in hud, "and the screen says so rather than showing a 0 (%r)" % hud)
+        chk(near(line, 10, 0.01),
+            "the offside line is on the second last opponent, x = %s" % line)
+        chk(9 in f[0.05], "a forward 5 cm past him is offside (%s)" % f[0.05])
+        chk(9 in f[0.15], "and so is one 15 cm past him (%s)" % f[0.15])
+        chk(not errs, "no console error%s" % ("" if not errs else " - " + str(errs[:2])))
+
+        # 2. The same two forwards, under a competition that publishes a 10 cm tolerance. Same
+        #    page, same code, same situation - one answer changes and the other does not.
+        #
+        #    The 15 cm forward is the control. Without him an empty flag list would pass this
+        #    section for the wrong reason, and on the first run of this suite it did exactly
+        #    that: the wiring was fine and the players had simply drifted.
+        f, line, prof, hud, errs = marginal(
+            base + "/play.html?competition=uefa&tolerance=0.10", [0.05, 0.15])
+        chk(prof["id"] == "uefa", "the query string selects a competition profile (%s)"
+                                  % prof["id"])
+        chk(abs(prof["levelToleranceM"] - 0.10) < 1e-9,
+            "and its published tolerance reaches the rules layer (%s)"
+            % prof["levelToleranceM"])
+        chk("10 CM" in hud, "the screen shows the tolerance being applied (%r)" % hud)
+        chk(9 not in f[0.05],
+            "the SAME forward, at the same 5 cm, is now given onside (%s)" % f[0.05])
+        chk(9 in f[0.15],
+            "while the one 15 cm past is still offside, so the flag still works (%s)"
+            % f[0.15])
+        chk(not errs, "no console error%s" % ("" if not errs else " - " + str(errs[:2])))
+
+        # 3. Every profile still plays the same Laws, and still says so.
+        chk(prof["lawsPublishedBy"] == "IFAB",
+            "the competition still plays the Laws published by the IFAB, unchanged")
+        chk(len(prof["unstated"]) > 5,
+            "and it still reports the regulation fields nobody has filled in (%d)"
+            % len(prof["unstated"]))
+
+        # 4. A bad link must still give somebody a playable game. A 404 on the rules would be a
+        #    worse outcome than ignoring an unknown competition name.
+        f, line, prof, hud, errs = marginal(base + "/play.html?competition=atlantis", [0.05])
+        chk(prof["id"] == "ifab",
+            "an unknown competition falls back to the Laws instead of throwing (%s)"
+            % prof["id"])
+        chk(9 in f[0.05], "and the match is still refereed (%s)" % f[0.05])
+        chk(not errs, "with no console error%s" % ("" if not errs else " - " + str(errs[:2])))
+
+        browser.close()
+
+
 def serve_here():
     """Serve this folder over http on a spare port, and return the base address.
 
@@ -649,6 +756,10 @@ def main():
         return 1 if FAIL[0] else 0
     run(url, "desktop, keyboard")
     run(url, "phone viewport, touch", mobile=True)
+    # The profile section needs to load the page under several query strings, so it takes the
+    # base address rather than a finished URL. Skipped when a URL was passed in by hand.
+    if not args:
+        run_profile(url[:-len("/play.html")])
     print("\n" + "=" * 64)
     print("  %d checks, %d passed, %d failed" % (PASS[0] + FAIL[0], PASS[0], FAIL[0]))
     print("=" * 64)
