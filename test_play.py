@@ -8,10 +8,14 @@ the net, the clock reached half time, or the player you are holding is the one t
 to the key you pressed.
 """
 
+import functools
+import http.server
 import json
 import math
 import pathlib
+import socketserver
 import sys
+import threading
 import time
 
 from playwright.sync_api import sync_playwright
@@ -605,9 +609,35 @@ def run_laws_only(url):
         browser.close()
 
 
+def serve_here():
+    """Serve this folder over http on a spare port, and return the base address.
+
+    THE SUITE USED TO OPEN play.html AS A file:// URL, AND THAT STOPPED WORKING THE DAY THE
+    LAWS BECAME THEIR OWN FILE. A page loaded from file:// has origin 'null', and a browser
+    refuses to import a module across that origin - so laws.js never loaded, window.__game
+    was never defined, and EVERY check failed, including the ones about the pitch and the
+    clock that have nothing to do with modules.
+
+    Uniform failure like that is the harness, not the thing being tested: a real defect
+    almost never breaks the first assertion and the last one at once. Serving over http is
+    also what the game actually ships as, so the test now runs the page the way a player
+    gets it rather than the way a file manager opens it.
+    """
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):   # one line per request would bury the checks
+            pass
+
+    handler = functools.partial(Quiet, directory=str(HERE))
+    # Port 0 asks the operating system for a free one, so two runs at once cannot collide.
+    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return "http://127.0.0.1:%d" % httpd.server_address[1]
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    url = args[0] if args else (HERE / "play.html").as_uri()
+    url = args[0] if args else serve_here() + "/play.html"
     print("=" * 64)
     print("checks on the playable match")
     print("=" * 64)
