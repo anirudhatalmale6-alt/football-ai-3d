@@ -411,11 +411,28 @@ def run(url, label, mobile=False):
             browser.close()
             return
 
-        # --- players actually animate, measured on the joints and not on pixels
+        # --- players actually animate, measured on the joints and not on pixels.
+        # THE PLAYER HAS TO BE RUNNING FOR THIS TO MEAN ANYTHING. It used to
+        # sample the controlled player standing on the halfway line at kick
+        # off, and it passed - because the gait was swinging a stationary
+        # man's legs through 34 degrees. Standing still is now genuinely
+        # still, so a check that a stationary player's legs move would be
+        # asserting the old fault. He is made to run first.
+        page.evaluate("() => window.__game.lockControl(true)")
+        page.keyboard.down("KeyD")
+        time.sleep(0.5)
         a1 = page.evaluate("() => window.__game.legAngles()")
-        time.sleep(0.7)
+        time.sleep(0.4)
         a2 = page.evaluate("() => window.__game.legAngles()")
+        page.keyboard.up("KeyD")
+        page.evaluate("() => window.__game.lockControl(false)")
         chk(a1 != a2, "the legs are moving (hip angles changed %s -> %s)" % (a1, a2))
+        # AND THE POSITIVE CONTROL'S OPPOSITE: standing still must be still,
+        # or the check above can never fail.
+        time.sleep(0.6)
+        b1 = page.evaluate("() => window.__game.gaitProbe(0, 240)")
+        chk(b1 < 0.12,
+            "a player who is standing is standing (swing %.3f radians)" % b1)
 
         # --- the gait must be a function of speed, not a loop. Standing still, the hips
         # --- barely move; running, they swing.
@@ -430,7 +447,16 @@ def run(url, label, mobile=False):
         chk(swing2 > swing0 and swing8 > swing2,
             "and the stride grows with speed: %.2f at 0, %.2f at 2, %.2f at 8 m/s"
             % (swing0, swing2, swing8))
-        chk(swing8 > 2.0, "at a sprint the hip swings %.2f radians" % swing8)
+        # A RANGE, NOT A FLOOR, AND THE REASON IS ANATOMY. This used to
+        # read `swing8 > 2.0` and the gait obliged with 2.54 radians -
+        # 145 degrees of hip travel, which no hip does. The check was
+        # pulling the animation towards a pose a person cannot hold, and
+        # it passed for months while the feet were being thrown out in
+        # front of the body. A sprinter's hip works through roughly 80
+        # to 100 degrees, so the check now has a ceiling as well.
+        chk(1.2 < swing8 < 2.0,
+            "at a sprint the hip swings %.2f radians, inside what a hip does"
+            % swing8)
 
         # --- the human's key actually moves the human's player.
         # The automatic switch is frozen first, otherwise the two readings can belong to two
