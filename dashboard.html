@@ -5,7 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI3Football — Game Dashboard</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700&display=swap');
+/* NOT ONE FONT IS FETCHED FROM ANYWHERE.
+   These pages used to @import three families from Google, which meant
+   a page that says it reaches out to nothing was reaching out on every
+   single load - and on a slow phone the text arrived after the game
+   did. The three names the stylesheets ask for are mapped here onto
+   faces the machine already has; if it has none of them the browser
+   falls through to its own, which is the right answer for a page that
+   has to work with no network at all. */
+@font-face{font-family:'Orbitron';font-weight:100 900;
+  src:local('DejaVu Sans Bold'),local('Arial Bold'),local('Helvetica Bold'),
+      local('Roboto Medium'),local('Segoe UI Semibold')}
+@font-face{font-family:'Rajdhani';font-weight:100 900;
+  src:local('DejaVu Sans'),local('Segoe UI'),local('Roboto'),local('Arial'),
+      local('Helvetica')}
+@font-face{font-family:'Share Tech Mono';
+  src:local('DejaVu Sans Mono'),local('Consolas'),local('Menlo'),
+      local('Liberation Mono'),local('Courier New')}
 :root { --bg: #0a0f0a; --panel: #0d1a0d; --border: #1a3a1a; --green: #00e676; --red: #ff1744; --yellow: #ffd740; --blue: #2979ff; --orange: #ff6d00; --white: #e0e8e0; --dim: #667766; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: var(--bg); color: var(--white); font-family: 'Share Tech Mono', monospace; font-size: 11px; overflow: hidden; height: 100vh; }
@@ -114,8 +130,11 @@ function playerSwitchFactor(h) {
 
 const COLUMNS = ['ID','Player','Team','X','Z','GoalProb%','CardRisk%','Zone','Quadrant','DistBall','BallForce','Laplace','OckTima','Nearby','CrowdRisk','DistRef','FoulSev','SwitchFactor','Territory','Violations','Commotion','OpponentGambler','TrafficLight','StayInGame%','SampleCol'];
 
-const PLAYERS_H = ['SALAH','FIRMINO','MANE','HENDERSON','VAN DIJK','ALEXANDER-ARNOLD','ROBERTSON','FABINHO','ALISSON','THIAGO','DIAZ'];
-const PLAYERS_A = ['HAALAND','DE BRUYNE','FODEN','RODRI','DIAS','WALKER','GREALISH','BERNARDO','EDERSON','GUNDOGAN','ALVAREZ'];
+// NO REAL PLAYER NAMES. Real squads, names and kits are licensed
+// property and this product does not use them. Shirt numbers and
+// positions carry everything a viewer needs.
+const PLAYERS_H = ['GK 1','LB 3','CB 4','CB 5','RB 2','CM 6','CM 8','CM 10','LW 11','ST 9','RW 7'];
+const PLAYERS_A = ['GK 1','LB 3','CB 4','CB 5','RB 2','CM 6','CM 8','CM 10','LW 11','ST 9','RW 7'];
 
 const homeForm = [{x:-48,z:0},{x:-35,z:-22},{x:-35,z:-8},{x:-35,z:8},{x:-35,z:22},{x:-20,z:-24},{x:-20,z:-8},{x:-20,z:8},{x:-20,z:24},{x:-8,z:-10},{x:-8,z:10}];
 const awayForm = [{x:48,z:0},{x:35,z:22},{x:35,z:8},{x:35,z:-8},{x:35,z:-22},{x:20,z:24},{x:20,z:8},{x:20,z:-8},{x:20,z:-24},{x:8,z:10},{x:8,z:-10}];
@@ -427,5 +446,6 @@ setInterval(() => {
 }, 1000);
 
 </script>
+<script src="tech.js"></script>
 </body>
 </html>
