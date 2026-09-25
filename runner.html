@@ -4,7 +4,23 @@
 <meta charset="utf-8">
 <title>AI2ORBIT Football AI - articulated runner prototype</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;600&display=swap');
+/* NOT ONE FONT IS FETCHED FROM ANYWHERE.
+   These pages used to @import three families from Google, which meant
+   a page that says it reaches out to nothing was reaching out on every
+   single load - and on a slow phone the text arrived after the game
+   did. The three names the stylesheets ask for are mapped here onto
+   faces the machine already has; if it has none of them the browser
+   falls through to its own, which is the right answer for a page that
+   has to work with no network at all. */
+@font-face{font-family:'Orbitron';font-weight:100 900;
+  src:local('DejaVu Sans Bold'),local('Arial Bold'),local('Helvetica Bold'),
+      local('Roboto Medium'),local('Segoe UI Semibold')}
+@font-face{font-family:'Rajdhani';font-weight:100 900;
+  src:local('DejaVu Sans'),local('Segoe UI'),local('Roboto'),local('Arial'),
+      local('Helvetica')}
+@font-face{font-family:'Share Tech Mono';
+  src:local('DejaVu Sans Mono'),local('Consolas'),local('Menlo'),
+      local('Liberation Mono'),local('Courier New')}
   html,body{margin:0;height:100%;background:#080b10;overflow:hidden;
             font-family:Rajdhani,system-ui,sans-serif;color:#cfe3ff}
   canvas{display:block}
@@ -29,11 +45,11 @@
   not a loop playing beside it. No external model, no animation file and no licence: every
   part is a primitive.
 </div>
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
-</script>
-<script type="module">
-import * as THREE from 'three';
+<script src="vendor/three.global.js"></script>
+<script src="lib.global.js"></script>
+<script src="gait.js"></script>
+<script src="tech.js"></script>
+<script>
 window.__ai2_ok = true;
 
 const scene = new THREE.Scene();
@@ -50,6 +66,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
+TECH.watch(renderer);
 
 scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x0b1a12, 0.75));
 const key = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -136,42 +153,15 @@ function makeCapsule(){
   return g;
 }
 
-// THE GAIT. Everything below is a function of SPEED and nothing is a function of wall clock
-// time on its own, so the animation cannot drift away from what the player is actually doing.
+// THE GAIT lives in gait.js - shared with play.html and demo.html, because three copies of
+// it is how one sign error ended up being three. The signs, the cycle and what was wrong
+// with it are written down there.
+//
+// This page keeps the rig on p.userData, and idles at a lower speed than the match pages do
+// with a small sway rather than a freeze: a motionless figure on a page whose whole subject
+// is the gait reads as a crash.
 function stride(p, speed, dt){
-  const u = p.userData;
-  // Cadence rises with speed but not linearly - a sprinter takes longer strides as well as
-  // faster ones, which is why the exponent is below one.
-  const cadence = speed < 0.05 ? 0.55 : 1.05 + 0.62 * Math.pow(speed, 0.85);
-  u.phase += cadence * dt * Math.PI * 2;
-  const s = Math.sin(u.phase), c = Math.cos(u.phase);
-
-  const drive = Math.min(1, speed / 7.5);              // 0 standing, 1 flat out
-  const swing = 0.22 + 1.05 * drive;                   // radians of thigh swing
-  const lift  = 0.15 + 1.35 * drive;                   // how far the heel comes up
-
-  u.legs.forEach((L, i) => {
-    const ph = i === 0 ? u.phase : u.phase + Math.PI;   // the two legs are half a cycle apart
-    const sp = Math.sin(ph);
-    L.hip.rotation.x = sp * swing - 0.06 * drive;
-    // A knee bends one way only. Clamping at zero is what stops the shin folding forwards,
-    // which is the single thing that makes a rig look wrong at a glance.
-    L.kn.rotation.x = -Math.max(0, Math.sin(ph - 0.9)) * lift - 0.05;
-    L.an.rotation.x = 0.28 * Math.max(0, Math.sin(ph + 0.4)) * drive;
-  });
-  u.arms.forEach((A, i) => {
-    const ph = i === 0 ? u.phase + Math.PI : u.phase;   // arms oppose the legs
-    A.sh.rotation.x = Math.sin(ph) * (0.20 + 0.85 * drive);
-    A.sh.rotation.z = A.side * (0.10 + 0.16 * drive);
-    A.el.rotation.x = -(0.25 + 0.95 * drive) - 0.3 * Math.max(0, Math.sin(ph));
-  });
-  // Lean into the run, and bob twice per stride - the body rises on each push off.
-  u.chest.rotation.x = 0.30 * drive;
-  u.hips.position.y  = 0.92 + Math.abs(c) * 0.045 * drive;
-  if (speed < 0.05) {                                  // idle: a small sway, not a freeze
-    u.hips.position.y = 0.92 + Math.sin(u.phase*0.6) * 0.008;
-    u.chest.rotation.x = 0.02;
-  }
+  GAIT.stride(p.userData, speed, dt, 0, 0, {idleBelow: 0.05, idleSway: true});
 }
 
 const SPEEDS = [2, 4, 6, 8];
