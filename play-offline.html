@@ -74,6 +74,16 @@
   #bShot{right:26px;bottom:78px;background:rgba(200,40,60,.62)}
   #bSprint{right:26px;bottom:170px;background:rgba(20,150,110,.55);width:64px;
            height:64px;font-size:10px}
+  .states{position:absolute;right:14px;top:140px;background:rgba(9,14,24,.85);
+     border-radius:7px;padding:7px 9px;font-size:10px;min-width:118px}
+  .states .srow{display:flex;align-items:center;gap:6px;margin:2px 0}
+  .states .srow i{width:8px;height:8px;border-radius:2px;display:inline-block}
+  .states .srow span{flex:1;color:#8fa8bd;letter-spacing:.05em}
+  .states .srow b{color:#fff;font-size:12px}
+  .lbl{font-size:8px;letter-spacing:.14em;color:#5d80ab;margin-bottom:4px}
+  .comm{position:absolute;left:14px;bottom:12px;background:rgba(9,14,24,.88);
+     border-radius:7px;padding:8px 10px;font-size:11px;line-height:1.5;
+     max-width:46vw;white-space:pre-line;color:#cfe0ee;pointer-events:none}
   .hint{position:absolute;right:14px;bottom:12px;font-size:11px;color:#5d80ab;text-align:right;
         font-family:Orbitron,sans-serif;letter-spacing:1px;line-height:1.7}
   /* A phone is 390 points wide. At that width the scoreboard, the telemetry and the three
@@ -104,6 +114,24 @@
     .pan b{font-size:12px}
     .bar{width:64px;height:3px;margin-top:3px}
     /* Clear of both columns, not across them. */
+    /* THE PHONE LAYOUT, SET FROM MEASURED RECTANGLES.
+       Guessing tops put the telemetry across the state list and
+       the commentary across YOUR STATE.  These numbers come from
+       reading the boxes back out of the running page:
+         left column  x 8-134,  y 74-249  (four panels)
+         right column x 231-404, y 12-262 (telemetry, then states)
+         commentary   full width from 266
+       The long RULES line is dropped on a phone - it is what made
+       the telemetry tall enough to reach the states. */
+    .tele{max-width:41vw}
+    .tele .rules{display:none}
+    .states{top:162px;right:8px;width:41vw;min-width:0;padding:5px 7px;
+            font-size:9px}
+    .states .srow b{font-size:11px}
+    /* Above the stick, never under it - the bottom third of a
+       phone belongs to the thumbs. */
+    .comm{left:8px;right:8px;bottom:auto;top:266px;max-width:none;
+          font-size:10px;line-height:1.5}
     .toast{top:30%;font-size:11px;max-width:90vw;text-align:center}
     .flash{top:44%}
     .hint{display:none}
@@ -162,13 +190,21 @@
     <div class="row"><span>FPS</span><b id="tFps">--</b></div>
     <div class="row"><span>RESTARTS</span><b id="tRes">--</b></div>
     <div class="row"><span>OFFSIDE</span><b id="tOff">0</b></div>
-    <div class="row"><span>RULES</span><b id="tComp">--</b></div>
+    <div class="row rules"><span>RULES</span><b id="tComp">--</b></div>
   </div>
   <div class="bot">
     <div class="pan">GOAL PROBABILITY<b id="pGoal">0%</b><span class="bar"><i id="bGoal" style="width:0"></i></span></div>
     <div class="pan">YOUR PLAYER<b id="pWho">--</b><span class="bar"><i id="bSta" style="width:100%"></i></span></div>
     <div class="pan">REFEREE AI<b id="pRef">PLAY ON</b></div>
+    <div class="pan">YOUR STATE<b id="myState">IDLE</b></div>
   </div>
+  <!-- THE STATE MACHINE, MADE VISIBLE.  Without this the states
+       exist but nobody can see them, and a thing nobody can see
+       is a thing nobody can check. -->
+  <div class="states"><div class="lbl">PLAYER STATES</div>
+    <div id="stateList"></div></div>
+  <div class="comm"><div class="lbl">COMMENTARY</div>
+    <div id="commList">kick off to begin</div></div>
   <div class="flash" id="flash"><div class="card" id="fCard"></div>
     <div><div class="txt" id="fTxt">CARD</div><div class="sub" id="fSub"></div></div></div>
   <div class="toast" id="toast"></div>
@@ -2140,6 +2176,8 @@ class Player {
     // say WHICH player it flagged without holding a reference to anything graphical.
     this.uid = team * 100 + idx;
     this.holding = 0;                 // seconds this keeper has had the ball in the hands
+    this.state = STATE.IDLE;          // one of STATE, recomputed every frame
+    this.wasState = STATE.IDLE;       // what it was last frame, so a CHANGE can be seen
   }
   // The plain description the rules layer works on: an id, a position, and whether the player
   // is still on the field. No mesh, no velocity, no team colour.
@@ -2158,6 +2196,64 @@ class Player {
     return base * (0.72 + 0.28*this.stamina);
   }
 }
+
+/* ==============================================================
+   THE PLAYER STATE.  One per player, every frame.
+
+   Six states were asked for by name - standby, running, large
+   player, idle, runner, kicker - and the choice of what each
+   one MEANS was left to me.  Here is what I chose and why.
+
+     IDLE      standing.  Under 0.35 m/s is not walking, it is
+               standing; below that a foot scuff would read as
+               movement.
+     STANDBY   on the move but not going anywhere in particular
+               - holding shape, shuffling across as the ball
+               moves.  This is most of what a footballer does
+               for most of a match.
+     RUNNING   going somewhere, with purpose.  2.2 m/s is about
+               a jog and is where "moving" becomes "running".
+     RUNNER    flat out.  The sprint is already a real thing in
+               this engine - it costs stamina and is capped -
+               so RUNNER is exactly that and not a speed guess.
+     KICKER    striking the ball, or in a tackle.  It lasts as
+               long as the engine's own kick and tackle timers,
+               so the state ends when the action ends.
+     LARGE     the player you are controlling.  Not a sixth
+               kind of movement - a player in any of the five
+               above can also be the one you are driving - so
+               it is drawn as SIZE rather than as a state, and
+               that is the choice: the big one is yours.
+
+   ONE STATE AT A TIME, decided in priority order, because a
+   player who is sprinting AND striking the ball is a kicker -
+   the kick is the thing that matters and the thing a viewer
+   sees.  A player cannot be two of these at once and the code
+   cannot express it.
+   ============================================================== */
+const STATE = { IDLE:'IDLE', STANDBY:'STANDBY', RUNNING:'RUNNING',
+                RUNNER:'RUNNER', KICKER:'KICKER' };
+const STATE_ORDER = ['KICKER','RUNNER','RUNNING','STANDBY','IDLE'];
+const STATE_COLOUR = { IDLE:'#6b7d8c', STANDBY:'#4a8fc0', RUNNING:'#2f9e5e',
+                       RUNNER:'#c8942a', KICKER:'#c8462a' };
+
+/* Pure: speed and two timers in, one name out.  Nothing here
+   reads the world, so it can be checked on its own. */
+function stateOf(speed, sprinting, kickTimer, tackleTimer){
+  if (kickTimer > 0 || tackleTimer > 0) return STATE.KICKER;
+  if (sprinting)      return STATE.RUNNER;
+  if (speed >= 2.2)   return STATE.RUNNING;
+  if (speed >= 0.35)  return STATE.STANDBY;
+  return STATE.IDLE;
+}
+
+/* PUT WHERE A TEST CAN REACH IT.
+   The state machine decides what every player is doing and what
+   the commentary says about it, so it is the one piece here that
+   most deserves being handed known numbers and checked against
+   known answers.  Inside a module nothing outside can call it,
+   so it is published deliberately. */
+window.__stateOf = stateOf;
 
 const ball = {
   pos: new THREE.Vector3(0, 0.11, 0),
@@ -2464,6 +2560,101 @@ function showCard(kind){
   showCard._t = setTimeout(() => { f.style.display = 'none'; }, 1600);
 }
 function setRef(t){ G.refText = t; G.refUntil = G.t + 2.5; }
+/* ==============================================================
+   THE COMMENTARY.
+
+   EVERY LINE IS CAUSED BY SOMETHING THAT ACTUALLY HAPPENED.
+   There is no timer picking phrases out of a bag: a line is
+   written when a player changes state, or when the rules layer
+   raises an event, and it names the player it is about.  If
+   the commentary says somebody broke into a sprint, that
+   player's state went to RUNNER on that frame.
+
+   That is the whole design rule, and it is the reason the
+   commentary is worth showing to anybody: it is a readout of
+   the engine, not decoration laid over the top of it.
+
+   TWO THINGS KEEP IT FROM BECOMING NOISE.  Twenty two players
+   changing state several times a second would fill the panel
+   in a moment and say nothing, so:
+
+     - only changes NEAR THE BALL are spoken.  Twenty five
+       metres.  A full back jogging into shape on the far side
+       is a real state change and is not commentary.
+     - one line a second at most, and never the same line twice
+       running.
+
+   Everything else still HAPPENS and is still counted on the
+   state panel - it simply is not narrated.
+   ============================================================== */
+const COMM = { lines: [], last: 0, lastText: '' };
+
+function commentary(text){
+  const now = performance.now();
+  if (now - COMM.last < 1000) return;      /* one a second */
+  if (text === COMM.lastText) return;      /* never twice running */
+  COMM.last = now; COMM.lastText = text;
+  const clock = el('clock') ? el('clock').textContent : '';
+  COMM.lines.unshift((clock ? clock + '  ' : '') + text);
+  /* Fewer lines on a narrow screen: six of them reach down
+     into the pitch on a phone. */
+  const keep = window.innerWidth <= 620 ? 4 : 6;
+  if (COMM.lines.length > keep) COMM.lines.length = keep;
+  const box = el('commList');
+  if (box) box.textContent = COMM.lines.join('\n');
+}
+
+function who(p){
+  return (p.team ? 'ORB ' : 'ATL ') + (p.name || ('#' + p.idx));
+}
+
+/* Distance from this player to the ball, in metres. */
+function toBall(p){
+  const dx = p.pos.x - ball.pos.x, dz = p.pos.y - ball.pos.y;
+  return Math.sqrt(dx*dx + dz*dz);
+}
+
+function onStateChange(p){
+  const d = toBall(p);
+  if (d > 25) return;                      /* not near the play */
+
+  if (p.state === STATE.KICKER) {
+    commentary(who(p) + (d < 2.5 ? ' gets a foot on it' : ' goes in for it'));
+  } else if (p.state === STATE.RUNNER) {
+    commentary(who(p) + (d < 8 ? ' bursts onto it' : ' breaks into a sprint'));
+  } else if (p.state === STATE.RUNNING && p.wasState === STATE.STANDBY) {
+    if (d < 12) commentary(who(p) + ' makes a move for it');
+  } else if (p.state === STATE.IDLE && p.wasState === STATE.RUNNER) {
+    commentary(who(p) + ' pulls up');
+  }
+}
+
+/* How many players are in each state right now.  This is the
+   readout that makes the state machine visible rather than
+   something you have to take on trust. */
+function stateCounts(){
+  const n = { IDLE:0, STANDBY:0, RUNNING:0, RUNNER:0, KICKER:0 };
+  for (const t of teams) for (const p of t) if (!p.off) n[p.state]++;
+  return n;
+}
+
+function drawStatePanel(){
+  const box = el('stateList');
+  if (!box) return;
+  const n = stateCounts();
+  let out = '';
+  for (const k of STATE_ORDER) {
+    out += '<div class="srow"><i style="background:' + STATE_COLOUR[k] +
+           '"></i><span>' + k + '</span><b>' + n[k] + '</b></div>';
+  }
+  box.innerHTML = out;
+  const me = el('myState');
+  if (me && G.controlled) {
+    me.textContent = G.controlled.state;
+    me.style.color = STATE_COLOUR[G.controlled.state];
+  }
+}
+
 function toast(t){
   const el = document.getElementById('toast');
   el.textContent = t;
@@ -2920,8 +3111,28 @@ function step(dt){
     p.pos.y = clamp(p.pos.y + p.vel.y*dt, -PITCH_Z-1, PITCH_Z+1);
     const sp = p.vel.length();
     if (sp > 0.35) p.face = Math.atan2(p.vel.x, p.vel.y);
+
+    /* THE STATE, once, here - after the frame's movement is
+       settled and before anything draws.  Working it out in the
+       renderer instead would mean the picture and the
+       commentary could disagree about the same player. */
+    p.wasState = p.state;
+    p.state = stateOf(sp, sprint, p.kick, p.tackle);
+    if (p.state !== p.wasState) onStateChange(p);
     p.rig.root.position.set(p.pos.x, 0, p.pos.y);
     p.rig.root.rotation.y = p.face;
+
+    /* THE LARGE PLAYER.  The one you are driving is drawn a
+       sixth bigger than the rest.
+       It is a SIZE and not a state, because the player you
+       control is also idle, or running, or kicking - being
+       yours is a different question from what he is doing, and
+       folding the two together would mean the state machine
+       could not answer either one properly.
+       A sixth is enough to find him at a glance on a phone and
+       little enough that he is still a footballer. */
+    const big = (p === G.controlled && !G.autoPlay) ? 1.16 : 1;
+    if (p.rig.root.scale.x !== big) p.rig.root.scale.setScalar(big);
     stride(p.rig, sp, dt, p.kick, p.tackle);
   }
 
@@ -3201,6 +3412,7 @@ function updateHUD(dt){
   el('pWho').textContent = c.name + ' ' + (c.idx+1);
   el('bSta').style.width = Math.round(c.stamina*100) + '%';
   el('pRef').textContent = G.t < G.refUntil ? G.refText : 'PLAY ON';
+  drawStatePanel();
 }
 
 // a ring under the player the human is holding, so it is never a guess which one that is
