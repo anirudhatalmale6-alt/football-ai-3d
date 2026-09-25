@@ -5,7 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI3Football — 3D Stadium</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+/* NOT ONE FONT IS FETCHED FROM ANYWHERE.
+   These pages used to @import three families from Google, which meant
+   a page that says it reaches out to nothing was reaching out on every
+   single load - and on a slow phone the text arrived after the game
+   did. The three names the stylesheets ask for are mapped here onto
+   faces the machine already has; if it has none of them the browser
+   falls through to its own, which is the right answer for a page that
+   has to work with no network at all. */
+@font-face{font-family:'Orbitron';font-weight:100 900;
+  src:local('DejaVu Sans Bold'),local('Arial Bold'),local('Helvetica Bold'),
+      local('Roboto Medium'),local('Segoe UI Semibold')}
+@font-face{font-family:'Rajdhani';font-weight:100 900;
+  src:local('DejaVu Sans'),local('Segoe UI'),local('Roboto'),local('Arial'),
+      local('Helvetica')}
+@font-face{font-family:'Share Tech Mono';
+  src:local('DejaVu Sans Mono'),local('Consolas'),local('Menlo'),
+      local('Liberation Mono'),local('Courier New')}
 
 :root {
   --bg-deep: #040A04;
@@ -494,17 +510,11 @@ body {
   <div class="splash-continents" id="splashConts"></div>
 </div>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "./vendor/three.module.min.js",
-    "three/addons/": "./vendor/addons/"
-  }
-}
-</script>
-
-<script type="module">
-import * as THREE from 'three';
+<script src="vendor/three.global.js"></script>
+<script src="lib.global.js"></script>
+<script src="gait.js"></script>
+<script src="tech.js"></script>
+<script>
 window.__ai2_ok = true;
 
 // ── Movement names ──
@@ -1150,6 +1160,7 @@ const canvas = document.getElementById('canvas3d');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+TECH.watch(renderer);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1170,8 +1181,12 @@ scene.add(ambientLight);
 const sunLight = new THREE.DirectionalLight(0xffffff, 1.4);
 sunLight.position.set(30, 50, 20);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.width = 2048;
-sunLight.shadow.mapSize.height = 2048;
+// A 2048 square shadow map is four times the work of a 1024 one, every
+// frame, and at this camera distance nothing on screen can show the
+// difference. On a phone it is the shadow pass that decides whether the
+// page is warm to hold.
+sunLight.shadow.mapSize.width = 1024;
+sunLight.shadow.mapSize.height = 1024;
 sunLight.shadow.camera.near = 1;
 sunLight.shadow.camera.far = 120;
 sunLight.shadow.camera.left = -60;
@@ -1289,7 +1304,33 @@ createGoal(-52.5, false);
 createGoal(52.5, true);
 
 // ── Stadium stands with spectators ──
-const spectatorMeshes = [];
+//
+// THIS PAGE RAN AT 8 FRAMES A SECOND AND THE CROWD WAS THE WHOLE OF IT.
+//
+// Every spectator used to be a Group holding two Meshes, and each of
+// those Meshes was given ITS OWN GEOMETRY AND ITS OWN MATERIAL. About
+// 2,200 spectators comes to roughly 4,400 meshes, 4,400 geometries and
+// 4,400 materials - so 4,400 draw calls a frame, and every shirt colour
+// its own shader upload at build time. The stands are scenery. They
+// were costing more than the twenty two players, the pitch, the ball
+// and the lighting put together.
+//
+// Now: TWO geometries and TWO materials for the entire crowd, drawn as
+// two InstancedMesh - one call for every body in the ground and one for
+// every head. Shirt colours are per instance colours, which cost
+// nothing extra. The measured effect is printed by shots.py and quoted
+// in the message that went with this change; it is not an estimate.
+// AND THE TRIANGLES, WHICH ARE A SEPARATE COST FROM THE DRAW CALLS.
+// Instancing does not remove one triangle - it removes the calls. The
+// crowd was 117,000 of the scene's 123,000 triangles, from a five sided
+// cylinder and a 5x4 sphere for each of about 2,200 people who occupy
+// three pixels each. Four sides and a 4x3 sphere is roughly half that
+// and cannot be told apart from the stands, which is where they are
+// seen from.
+const spectatorSlots = [];          // where each spectator sits
+const SPEC_BODY = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 4);
+const SPEC_HEAD = new THREE.SphereGeometry(0.12, 4, 3);
+let crowdBodies = null, crowdHeads = null;
 
 function createStand(x, z, width, depth, rot) {
   const standGroup = new THREE.Group();
@@ -1304,31 +1345,21 @@ function createStand(x, z, width, depth, rot) {
     step.position.set(0, r * 0.8 + 0.4, r * (depth / rows) * 0.5);
     standGroup.add(step);
 
-    // Spectators with body + head
     const specCount = Math.floor(width / 1.2);
     for (let d = 0; d < specCount; d++) {
-      const specGroup = new THREE.Group();
-      const hue = Math.random();
-      const shirtColor = new THREE.Color().setHSL(hue, 0.6, 0.45);
-      // Body
-      const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 5);
-      const bodyMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.8 });
-      const body = new THREE.Mesh(bodyGeo, bodyMat);
-      body.position.y = 0.25;
-      specGroup.add(body);
-      // Head
-      const headGeo = new THREE.SphereGeometry(0.12, 5, 4);
-      const headMat = new THREE.MeshStandardMaterial({ color: 0xDEB887, roughness: 0.8 });
-      const head = new THREE.Mesh(headGeo, headMat);
-      head.position.y = 0.6;
-      specGroup.add(head);
-
+      // Positions are worked out in the stand's own frame and then
+      // moved into the world once, because an InstancedMesh has no
+      // parent to inherit a rotation from.
       const sx = -width/2 + d * 1.2 + Math.random() * 0.4;
       const sy = r * 0.8 + 0.8;
       const sz = r * (depth/rows) * 0.5;
-      specGroup.position.set(sx, sy, sz);
-      standGroup.add(specGroup);
-      spectatorMeshes.push(specGroup);
+      const cos = Math.cos(rot), sin = Math.sin(rot);
+      spectatorSlots.push({
+        x: x + sx * cos + sz * sin,
+        y: sy,
+        z: z - sx * sin + sz * cos,
+        hue: Math.random()
+      });
     }
   }
 
@@ -1344,9 +1375,59 @@ createStand(0, 42, 100, 12, Math.PI);
 createStand(-60, 0, 68, 10, Math.PI / 2);
 createStand(60, 0, 68, 10, -Math.PI / 2);
 
+function buildCrowd() {
+  const n = spectatorSlots.length;
+  const bodyMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xDEB887,
+                                                   roughness: 0.8 });
+  crowdBodies = new THREE.InstancedMesh(SPEC_BODY, bodyMat, n);
+  crowdHeads  = new THREE.InstancedMesh(SPEC_HEAD, headMat, n);
+  crowdBodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  crowdHeads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const m = new THREE.Matrix4(), c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const s = spectatorSlots[i];
+    m.makeTranslation(s.x, s.y + 0.25, s.z);
+    crowdBodies.setMatrixAt(i, m);
+    crowdBodies.setColorAt(i, c.setHSL(s.hue, 0.6, 0.45));
+    m.makeTranslation(s.x, s.y + 0.6, s.z);
+    crowdHeads.setMatrixAt(i, m);
+  }
+  crowdBodies.instanceMatrix.needsUpdate = true;
+  crowdHeads.instanceMatrix.needsUpdate = true;
+  scene.add(crowdBodies);
+  scene.add(crowdHeads);
+}
+buildCrowd();
+
+// THE WAVE. It used to read `spec.position.y += Math.sin(...)`, which
+// ADDS a new offset every frame rather than setting one - a random walk,
+// so over a long match the crowd drifted off its seats and kept going.
+// The height is now SET from the seat position each time, so however
+// long the page is left running the crowd is where it was put.
+function swayCrowd(time) {
+  if (!crowdBodies) return;
+  const m = new THREE.Matrix4();
+  // Every fourth spectator moves, as before: a whole ground breathing
+  // in step looks like one object, not like people.
+  for (let i = 0; i < spectatorSlots.length; i += 4) {
+    const s = spectatorSlots[i];
+    const lift = Math.sin(time * 0.002 + i * 0.3) * 0.07;
+    m.makeTranslation(s.x, s.y + 0.25 + lift, s.z);
+    crowdBodies.setMatrixAt(i, m);
+    m.makeTranslation(s.x, s.y + 0.6 + lift, s.z);
+    crowdHeads.setMatrixAt(i, m);
+  }
+  crowdBodies.instanceMatrix.needsUpdate = true;
+  crowdHeads.instanceMatrix.needsUpdate = true;
+}
+
 // ── Player names ──
-const homeNames = ['SALAH','FIRMINO','MANE','HENDERSON','VAN DIJK','ALEXANDER-ARNOLD','ROBERTSON','FABINHO','ALISSON','THIAGO','DIAZ'];
-const awayNames = ['HAALAND','DE BRUYNE','FODEN','RODRI','DIAS','WALKER','GREALISH','BERNARDO','EDERSON','GUNDOGAN','ALVAREZ'];
+// NO REAL PLAYER NAMES. Real squads, names and kits are licensed
+// property and this product does not use them. Shirt numbers and
+// positions carry everything a viewer needs.
+const homeNames = ['GK 1','LB 3','CB 4','CB 5','RB 2','CM 6','CM 8','CM 10','LW 11','ST 9','RW 7'];
+const awayNames = ['GK 1','LB 3','CB 4','CB 5','RB 2','CM 6','CM 8','CM 10','LW 11','ST 9','RW 7'];
 
 // ── Scrolling ad boards (player names + branding) ──
 const adBoards = [];
@@ -1822,6 +1903,7 @@ const SIM_INTERVAL = 500; // 2 ticks per second for smoother ball, real-time 90 
 
 function animate(time) {
   requestAnimationFrame(animate);
+  TECH.mark();   // see tech.js - this page's own work, timed
 
   // Simulation tick
   if (time - lastSimTime > SIM_INTERVAL && gameState.running) {
@@ -1885,14 +1967,8 @@ function animate(time) {
   // Card risk per player (distance to goalie exponent)
   updateCardRisks();
 
-  // Crowd wave animation (subtle swaying)
-  for (let s = 0; s < spectatorMeshes.length; s += 4) {
-    const spec = spectatorMeshes[s];
-    if (spec) {
-      spec.position.y += Math.sin(time * 0.002 + s * 0.3) * 0.001;
-      spec.rotation.z = Math.sin(time * 0.001 + s * 0.5) * 0.05;
-    }
-  }
+  // Crowd wave animation (subtle swaying) - see swayCrowd above
+  swayCrowd(time);
 
   // Camera
   if (gameState.camLoop) {
@@ -1939,6 +2015,7 @@ function animate(time) {
   glowMat.opacity = 0.1 + Math.sin(time * 0.003) * 0.05;
 
   renderer.render(scene, camera);
+  TECH.done();
 }
 
 requestAnimationFrame(animate);
