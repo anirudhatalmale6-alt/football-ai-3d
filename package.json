@@ -1,8 +1,7 @@
 {
-  "name": "project",
+  "name": "football-ai-3d",
   "version": "1.0.0",
-  "scripts": {
-    "build": "node canary.js && tsc",
-    "prepare": "node canary.js"
-  }
+  "private": true,
+  "description": "FootballAI. Static pages - nothing to install and nothing to build.",
+  "scripts": {}
 }
