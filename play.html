@@ -5,7 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>AI2ORBIT Football AI - Playable</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;600;700&display=swap');
+/* NOT ONE FONT IS FETCHED FROM ANYWHERE.
+   These pages used to @import three families from Google, which meant
+   a page that says it reaches out to nothing was reaching out on every
+   single load - and on a slow phone the text arrived after the game
+   did. The three names the stylesheets ask for are mapped here onto
+   faces the machine already has; if it has none of them the browser
+   falls through to its own, which is the right answer for a page that
+   has to work with no network at all. */
+@font-face{font-family:'Orbitron';font-weight:100 900;
+  src:local('DejaVu Sans Bold'),local('Arial Bold'),local('Helvetica Bold'),
+      local('Roboto Medium'),local('Segoe UI Semibold')}
+@font-face{font-family:'Rajdhani';font-weight:100 900;
+  src:local('DejaVu Sans'),local('Segoe UI'),local('Roboto'),local('Arial'),
+      local('Helvetica')}
+@font-face{font-family:'Share Tech Mono';
+  src:local('DejaVu Sans Mono'),local('Consolas'),local('Menlo'),
+      local('Liberation Mono'),local('Courier New')}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#05070b;overflow:hidden;
             font-family:Rajdhani,system-ui,sans-serif;color:#cfe3ff;
@@ -44,7 +60,7 @@
         border:1px solid #1b3a63}
   .tele .row{display:flex;justify-content:space-between;gap:14px;margin:3px 0;color:#7fb0ea}
   .tele .row b{color:#fff;font-size:13px}
-  .bot{position:absolute;left:14px;bottom:12px;display:flex;gap:8px;flex-wrap:wrap}
+  .bot{position:absolute;left:14px;bottom:12px;display:flex;gap:8px;flex-wrap:nowrap}
   .pan{background:rgba(9,14,24,.86);border:1px solid #1b3a63;border-radius:7px;padding:7px 12px;
        font-family:Orbitron,sans-serif;font-size:10px;color:#6f9fd4;letter-spacing:1px}
   .pan b{display:block;font-size:16px;color:#fff;letter-spacing:0;margin-top:2px}
@@ -74,14 +90,14 @@
   #bShot{right:26px;bottom:78px;background:rgba(200,40,60,.62)}
   #bSprint{right:26px;bottom:170px;background:rgba(20,150,110,.55);width:64px;
            height:64px;font-size:10px}
-  .states{position:absolute;right:14px;top:140px;background:rgba(9,14,24,.85);
+  .states{position:absolute;right:14px;top:173px;background:rgba(9,14,24,.85);
      border-radius:7px;padding:7px 9px;font-size:10px;min-width:118px}
   .states .srow{display:flex;align-items:center;gap:6px;margin:2px 0}
   .states .srow i{width:8px;height:8px;border-radius:2px;display:inline-block}
   .states .srow span{flex:1;color:#8fa8bd;letter-spacing:.05em}
   .states .srow b{color:#fff;font-size:12px}
   .lbl{font-size:8px;letter-spacing:.14em;color:#5d80ab;margin-bottom:4px}
-  .comm{position:absolute;left:14px;bottom:12px;background:rgba(9,14,24,.88);
+  .comm{position:absolute;left:14px;bottom:79px;background:rgba(9,14,24,.88);
      border-radius:7px;padding:8px 10px;font-size:11px;line-height:1.5;
      max-width:46vw;white-space:pre-line;color:#cfe0ee;pointer-events:none}
   .hint{position:absolute;right:14px;bottom:12px;font-size:11px;color:#5d80ab;text-align:right;
@@ -215,15 +231,12 @@
   <div class="hint">AI2ORBIT CO. 2026<br>P TO PAUSE</div>
 </div>
 
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
-</script>
-<script type="module">
-import * as THREE from 'three';
+<script src="vendor/three.global.js"></script>
+<script src="lib.global.js"></script>
+<script src="gait.js"></script>
+<script src="tech.js"></script>
+<script>
 window.__ai2_ok = true;
-import * as LAW from './laws.js';
-import * as PROF from './profiles.js';
-
 // ============================================================================================
 // AI2ORBIT Football AI - playable match
 // Copyright (c) AI2ORBIT Co. 2026
@@ -293,6 +306,7 @@ const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
+TECH.watch(renderer);
 
 scene.add(new THREE.HemisphereLight(0xc8ddff, 0x0a1a12, 0.95));
 const sun = new THREE.DirectionalLight(0xffffff, 1.35);
@@ -426,42 +440,11 @@ function buildRig(kit, shorts){
   return {root, hips, chest, arms, legs, phase: rnd()*6.283};
 }
 
-// THE GAIT. Cadence and stride come from SPEED, so a player who slows down stops sprinting on
-// the spot. Everything here is a rotation about a joint; nothing is a position keyframe.
+// THE GAIT lives in gait.js, because this page, runner.html and demo.html all needed it and
+// three copies is how one sign error became three. The run cycle, the joint sign convention
+// and what was wrong with it are all written down there.
 function stride(rig, speed, dt, kicking, tackling){
-  const cadence = speed < 0.15 ? 0.55 : 1.05 + 0.62 * Math.pow(speed, 0.85);
-  rig.phase += cadence * dt * 6.283185;
-  const drive = clamp(speed/7.5, 0, 1);
-  const swing = 0.22 + 1.05*drive, lift = 0.15 + 1.35*drive;
-  rig.legs.forEach((L, i) => {
-    const ph = i === 0 ? rig.phase : rig.phase + Math.PI;
-    L.hip.rotation.x = Math.sin(ph)*swing - 0.06*drive;
-    // A knee bends ONE WAY. Clamping at zero is the single thing that stops a rig looking
-    // broken at a glance.
-    L.kn.rotation.x = -Math.max(0, Math.sin(ph - 0.9))*lift - 0.05;
-    L.an.rotation.x = 0.28*Math.max(0, Math.sin(ph + 0.4))*drive;
-  });
-  rig.arms.forEach((A, i) => {
-    const ph = i === 0 ? rig.phase + Math.PI : rig.phase;
-    A.sh.rotation.x = Math.sin(ph)*(0.20 + 0.85*drive);
-    A.sh.rotation.z = A.side*(0.10 + 0.16*drive);
-    A.el.rotation.x = -(0.25 + 0.95*drive) - 0.3*Math.max(0, Math.sin(ph));
-  });
-  rig.chest.rotation.x = 0.30*drive;
-  rig.hips.position.y = 0.92 + Math.abs(Math.cos(rig.phase))*0.045*drive;
-  if (speed < 0.15) { rig.hips.position.y = 0.92; rig.chest.rotation.x = 0.02; }
-  if (kicking > 0) {                                  // a kick overrides the right leg
-    const k = Math.sin(clamp(kicking, 0, 1)*Math.PI);
-    rig.legs[1].hip.rotation.x = -1.5*k;
-    rig.legs[1].kn.rotation.x  = -0.2 - 0.7*(1-k);
-    rig.chest.rotation.x = 0.30*drive - 0.25*k;
-  }
-  if (tackling > 0) {                                 // a slide: both legs out, body low
-    const t = Math.sin(clamp(tackling, 0, 1)*Math.PI);
-    rig.hips.position.y = 0.92 - 0.5*t;
-    rig.chest.rotation.x = 0.3 + 0.9*t;
-    rig.legs.forEach(L => { L.hip.rotation.x = -1.1*t; L.kn.rotation.x = -0.1; });
-  }
+  GAIT.stride(rig, speed, dt, kicking, tackling, {idleBelow: 0.15});
 }
 
 // ============================================================================================
@@ -1768,6 +1751,10 @@ function hideOffsideLine(){ offsideMesh.visible = false; offsideShownUntil = 0; 
 let last = performance.now(), acc = 0, frames = 0, fpsT = 0;
 function frame(now){
   requestAnimationFrame(frame);
+  // Everything between mark() and done() is what the CPU line on the
+  // hardware panel counts. It is this page's own work and nothing else,
+  // which is the only CPU figure a browser is entitled to report.
+  TECH.mark();
   let dt = (now - last)/1000; last = now;
   if (dt > 0.1) dt = 0.1;                     // a tab that was in the background does not warp
   frames++; fpsT += dt;
@@ -1790,6 +1777,7 @@ function frame(now){
   updateCamera(dt);
   updateHUD(dt);
   renderer.render(scene, camera);
+  TECH.done();
 }
 requestAnimationFrame(frame);
 
@@ -1888,6 +1876,40 @@ window.__game = {
       hi = Math.max(hi, rig.legs[0].hip.rotation.x);
     }
     return +(hi - lo).toFixed(4);
+  },
+  // WHERE THE FOOT ACTUALLY IS, rather than what the joint angle says.
+  //
+  // gaitProbe above reports how far the HIP swings, and that number was
+  // healthy the whole time the run cycle was wrong - a hip can swing a
+  // textbook amount while the knee below it throws the boot out in front
+  // of the body. So this walks the gait on a scratch rig and reads the
+  // BOOT's world position relative to the hips, every frame: how far
+  // forward it is, and how high. Two numbers come out of that and they
+  // are the ones a person is actually looking at -
+  //
+  //   PLANT   the forward offset at the moment the foot is lowest, ie.
+  //           where it touches down. A runner plants UNDER himself. A
+  //           foot that lands half a metre in front is not running, it
+  //           is being dragged along in front of the body.
+  //   PUSH    how far behind the hip the foot gets. Running has a push
+  //           off phase; without it the legs paddle and never extend.
+  //
+  // The raw frames are returned and the arithmetic is done by whatever
+  // asked, so the verdict is not written twice.
+  footTrack: (speed, frames) => {
+    const rig = buildRig(MATS.kitA, MATS.shA);
+    rig.root.visible = false; scene.add(rig.root);
+    const boot = rig.legs[0].an.children[0];
+    const w = new THREE.Vector3(), h = new THREE.Vector3(), out = [];
+    for (let i = 0; i < (frames || 180); i++) {
+      stride(rig, speed, 1/60, 0, 0);
+      rig.root.updateMatrixWorld(true);
+      boot.getWorldPosition(w); rig.hips.getWorldPosition(h);
+      out.push({ fwd: +(w.z - h.z).toFixed(4), y: +w.y.toFixed(4),
+                 lean: +rig.chest.rotation.x.toFixed(4) });
+    }
+    scene.remove(rig.root);
+    return out;
   },
   advance: (seconds) => { const n = Math.round(seconds*60);
                           for (let i=0;i<n;i++) step(1/60); },
