@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI2ORBIT — European routing scan</title>
+<!--
+  THE EUROPEAN SCAN.  AI2ORBIT Co. (c) 2026.
+
+  The same view as the UK routing page, across Europe: every
+  exchange as a dot, every router-to-router link as a line, and a
+  path drawn through them from one city to another.
+
+  *** WHAT IS REAL HERE AND WHAT IS NOT. ***
+
+  REAL: the cities and their coordinates, and therefore every
+  distance on this page.  Great circle, worked out from the
+  coordinates by the page itself.  Nothing typed in.
+
+  REAL: the arithmetic.  Light in fibre travels at about two
+  thirds of its speed in vacuum, so 1000 km of cable is about
+  5.0 ms one way.  That figure is derived, it is written on the
+  page, and anybody can check it.
+
+  MODELLED: which exchange connects to which.  This page does not
+  read any carrier's topology - no such list is public and this
+  program opens no socket.  The links are built from distance:
+  an exchange joins its nearest few neighbours.  That produces a
+  network of the right SHAPE for showing how rerouting behaves.
+  It is NOT a map of anybody's actual network and the page says
+  so where it can be seen.
+
+  NOT CLAIMED: that any of these paths exists, that any carrier
+  routes this way, or that any latency here was observed.
+-->
+<style>
+  :root{--bg:#0b0f14;--pan:#121a22;--line:#1e2b36;--ink:#dbe7f0;
+        --dim:#7c93a6;--go:#2f9e5e;--alt:#c8942a;--bad:#c8462a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:Consolas,"DejaVu Sans Mono",monospace;font-size:13px}
+  header{padding:12px 16px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:15px;letter-spacing:.1em}
+  .sub{color:var(--dim);font-size:11px;margin-top:4px}
+  .wrap{padding:12px 16px;max-width:1200px;margin:0 auto}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:10px}
+  label{display:block;font-size:10px;color:var(--dim);
+        letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}
+  select,button{font:inherit;background:var(--pan);color:var(--ink);
+       border:1px solid var(--line);padding:7px 10px;cursor:pointer}
+  button.go{background:var(--go);border-color:var(--go);color:#fff;font-weight:700}
+  button.alt{background:var(--pan);border-color:var(--alt);color:var(--alt)}
+  svg{width:100%;height:auto;background:#0e141b;border:1px solid var(--line)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+         gap:8px;margin-top:10px}
+  .card{background:var(--pan);border:1px solid var(--line);padding:8px 10px}
+  .card .k{font-size:10px;color:var(--dim);letter-spacing:.07em;
+           text-transform:uppercase}
+  .card .v{font-size:17px;margin-top:3px}
+  .note{border-left:3px solid var(--line);padding:8px 0 8px 12px;
+        margin-top:12px;color:var(--dim);font-size:12px;line-height:1.6}
+  .note b{color:var(--ink)}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
+  th{text-align:left;font-size:10px;color:var(--dim);letter-spacing:.07em;
+     text-transform:uppercase;border-bottom:1px solid var(--line);padding:5px 6px}
+  td{padding:4px 6px;border-bottom:1px solid #16212b}
+  td.n{text-align:right}
+</style></head>
+<body>
+<header>
+  <h1>EUROPEAN ROUTING SCAN</h1>
+  <div class="sub">AI2ORBIT Co. &mdash; which way the data goes, and what it costs</div>
+</header>
+<div class="wrap">
+  <div class="bar">
+    <div><label>from</label><select id="from"></select></div>
+    <div><label>to</label><select id="to"></select></div>
+    <div><label>&nbsp;</label><button class="go" id="route">ROUTE</button></div>
+    <div><label>&nbsp;</label><button class="alt" id="reroute">REROUTE</button></div>
+    <div><label>&nbsp;</label><button id="csv">EXPORT CSV</button></div>
+  </div>
+
+  <svg id="map" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid meet"></svg>
+
+  <div class="cards" id="cards"></div>
+  <table id="hops"><thead><tr><th>#</th><th>exchange</th>
+    <th class="n">leg km</th><th class="n">running km</th>
+    <th class="n">leg ms</th></tr></thead><tbody></tbody></table>
+
+  <div class="note" id="honest"></div>
+</div>
+<script>
+"use strict";
+
+/* Real places, real coordinates.  Every distance on this page is
+   worked out from these and nothing else. */
+var CITY = [
+  ["London",51.507,-0.128],["Amsterdam",52.374,4.892],["Frankfurt",50.110,8.682],
+  ["Paris",48.857,2.352],["Brussels",50.851,4.352],["Dublin",53.350,-6.260],
+  ["Copenhagen",55.676,12.568],["Stockholm",59.329,18.069],["Oslo",59.914,10.752],
+  ["Helsinki",60.170,24.938],["Tallinn",59.437,24.754],["Riga",56.949,24.105],
+  ["Vilnius",54.687,25.280],["Warsaw",52.230,21.012],["Berlin",52.520,13.405],
+  ["Hamburg",53.551,9.994],["Munich",48.135,11.582],["Vienna",48.208,16.374],
+  ["Prague",50.076,14.438],["Budapest",47.498,19.040],["Bratislava",48.146,17.107],
+  ["Zurich",47.377,8.542],["Milan",45.464,9.190],["Rome",41.903,12.496],
+  ["Madrid",40.417,-3.704],["Barcelona",41.385,2.173],["Lisbon",38.722,-9.139],
+  ["Marseille",43.296,5.370],["Lyon",45.764,4.836],["Geneva",46.204,6.143],
+  ["Luxembourg",49.611,6.132],["Zagreb",45.815,15.982],["Belgrade",44.787,20.449],
+  ["Bucharest",44.427,26.103],["Sofia",42.698,23.322],["Athens",37.984,23.728],
+  ["Istanbul",41.008,28.978],["Kyiv",50.450,30.523],["Minsk",53.902,27.562],
+  ["Gothenburg",57.709,11.974],["Manchester",53.481,-2.242],["Edinburgh",55.953,-3.188],
+  ["Rotterdam",51.924,4.478],["Cologne",50.938,6.960],["Stuttgart",48.775,9.182],
+  ["Krakow",50.065,19.945],["Porto",41.158,-8.629],["Valencia",39.470,-0.377],
+  ["Naples",40.852,14.268],["Palermo",38.116,13.361]
+];
+
+/* Great circle, in kilometres.  Worked out, not typed. */
+function km(a,b){
+  var R=6371, p1=a[1]*Math.PI/180, p2=b[1]*Math.PI/180;
+  var dp=(b[1]-a[1])*Math.PI/180, dl=(b[2]-a[2])*Math.PI/180;
+  var h=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+/* LIGHT IN FIBRE.  About two thirds of its speed in vacuum, so
+   1000 km of cable is close to 5.0 ms one way.  Derived here and
+   printed on the page so it can be checked rather than believed. */
+var C_FIBRE = 299792.458 * (2/3);          /* km a second */
+function ms(d){ return d / C_FIBRE * 1000; }
+
+/* A CABLE IS NOT A STRAIGHT LINE.  It follows roads, rail and
+   coast, so the fibre between two cities is longer than the
+   great circle between them.  A factor is applied and SAID. */
+var CABLE_FACTOR = 1.35;
+
+/* THE LINKS.  Built from distance - each exchange joins its
+   nearest few neighbours.  This is a MODEL of the shape, not
+   anybody's real topology. */
+var NEAR = 4, MAXLINK = 900;
+var links = [], adj = [];
+(function build(){
+  var i,j;
+  for(i=0;i<CITY.length;i++) adj.push([]);
+  for(i=0;i<CITY.length;i++){
+    var d=[];
+    for(j=0;j<CITY.length;j++) if(j!==i) d.push([km(CITY[i],CITY[j]),j]);
+    d.sort(function(p,q){return p[0]-q[0];});
+    for(j=0;j<NEAR && j<d.length;j++){
+      if(d[j][0]>MAXLINK) break;
+      var a=i,b=d[j][1];
+      if(adj[a].indexOf(b)<0){ adj[a].push(b); adj[b].push(a);
+        links.push([a,b,d[j][0]]); }
+    }
+  }
+})();
+
+/* The map.  A plain equirectangular projection with longitude
+   squeezed by the cosine of the middle latitude, which keeps
+   Europe the right shape at this size. */
+var LAT0=54, W=1000, H=620, PAD=34;
+function proj(c){
+  var x=c[2]*Math.cos(LAT0*Math.PI/180), y=c[1];
+  return [x,y];
+}
+var bounds=(function(){
+  var xs=[],ys=[];
+  CITY.forEach(function(c){var p=proj(c);xs.push(p[0]);ys.push(p[1]);});
+  return [Math.min.apply(null,xs),Math.max.apply(null,xs),
+          Math.min.apply(null,ys),Math.max.apply(null,ys)];
+})();
+function xy(c){
+  var p=proj(c);
+  var x=PAD+(p[0]-bounds[0])/(bounds[1]-bounds[0])*(W-2*PAD);
+  var y=H-PAD-(p[1]-bounds[2])/(bounds[3]-bounds[2])*(H-2*PAD);
+  return [x,y];
+}
+
+/* Dijkstra over the modelled links, cost in cable kilometres. */
+function path(s,t,avoid){
+  var n=CITY.length, dist=[], prev=[], seen=[], i;
+  for(i=0;i<n;i++){dist.push(Infinity);prev.push(-1);seen.push(false);}
+  dist[s]=0;
+  for(;;){
+    var u=-1,best=Infinity;
+    for(i=0;i<n;i++) if(!seen[i]&&dist[i]<best){best=dist[i];u=i;}
+    if(u<0||u===t) break;
+    seen[u]=true;
+    for(i=0;i<adj[u].length;i++){
+      var v=adj[u][i];
+      if(avoid && avoid.indexOf(u+'-'+v)>=0) continue;
+      if(avoid && avoid.indexOf(v+'-'+u)>=0) continue;
+      var w=km(CITY[u],CITY[v]);
+      if(dist[u]+w<dist[v]){dist[v]=dist[u]+w;prev[v]=u;}
+    }
+  }
+  if(dist[t]===Infinity) return null;
+  var out=[],c=t;
+  while(c>=0){out.unshift(c);c=prev[c];}
+  return out;
+}
+
+var svg=document.getElementById("map");
+var elFrom=document.getElementById("from"), elTo=document.getElementById("to");
+CITY.forEach(function(c,i){
+  var o1=document.createElement("option");o1.value=i;o1.textContent=c[0];elFrom.appendChild(o1);
+  var o2=document.createElement("option");o2.value=i;o2.textContent=c[0];elTo.appendChild(o2);
+});
+elFrom.value=0; elTo.value=9;            /* London to Helsinki */
+
+var current=null, avoided=[];
+
+function draw(p){
+  var s="";
+  links.forEach(function(l){
+    var a=xy(CITY[l[0]]), b=xy(CITY[l[1]]);
+    s+='<line x1="'+a[0].toFixed(1)+'" y1="'+a[1].toFixed(1)+
+       '" x2="'+b[0].toFixed(1)+'" y2="'+b[1].toFixed(1)+
+       '" stroke="#24333f" stroke-width="1"/>';
+  });
+  if(p) for(var i=0;i<p.length-1;i++){
+    var a=xy(CITY[p[i]]), b=xy(CITY[p[i+1]]);
+    s+='<line x1="'+a[0].toFixed(1)+'" y1="'+a[1].toFixed(1)+
+       '" x2="'+b[0].toFixed(1)+'" y2="'+b[1].toFixed(1)+
+       '" stroke="'+(avoided.length?"#c8942a":"#2f9e5e")+'" stroke-width="3"/>';
+  }
+  CITY.forEach(function(c,i){
+    var q=xy(c), on=p&&p.indexOf(i)>=0;
+    var r=on?5:3, fill=on?(avoided.length?"#c8942a":"#2f9e5e"):"#456073";
+    if(p&&(i===p[0]||i===p[p.length-1])){r=7;fill="#dbe7f0";}
+    s+='<circle cx="'+q[0].toFixed(1)+'" cy="'+q[1].toFixed(1)+'" r="'+r+
+       '" fill="'+fill+'"/>';
+    if(on||r===7)
+      s+='<text x="'+(q[0]+8).toFixed(1)+'" y="'+(q[1]+4).toFixed(1)+
+         '" fill="#dbe7f0" font-size="11" font-family="monospace">'+c[0]+'</text>';
+  });
+  svg.innerHTML=s;
+}
+
+function show(p){
+  current=p;
+  var tb=document.querySelector("#hops tbody"); tb.innerHTML="";
+  if(!p){ document.getElementById("cards").innerHTML=
+    '<div class="card"><div class="k">no path</div><div class="v">&mdash;</div></div>';
+    draw(null); return; }
+  var run=0, i, straight=km(CITY[p[0]],CITY[p[p.length-1]]);
+  for(i=0;i<p.length;i++){
+    var leg = i? km(CITY[p[i-1]],CITY[p[i]]) : 0;
+    run += leg;
+    var tr=document.createElement("tr");
+    tr.innerHTML='<td>'+i+'</td><td>'+CITY[p[i]][0]+'</td>'+
+      '<td class="n">'+(i?leg.toFixed(0):"&mdash;")+'</td>'+
+      '<td class="n">'+run.toFixed(0)+'</td>'+
+      '<td class="n">'+(i?ms(leg*CABLE_FACTOR).toFixed(2):"&mdash;")+'</td>';
+    tb.appendChild(tr);
+  }
+  var cable=run*CABLE_FACTOR;
+  var cards=[
+    ["path", avoided.length? "rerouted" : "shortest"],
+    ["hops", (p.length-1)],
+    ["great circle", run.toFixed(0)+" km"],
+    ["cable, estimated", cable.toFixed(0)+" km"],
+    ["one way", ms(cable).toFixed(2)+" ms"],
+    ["there and back", (ms(cable)*2).toFixed(2)+" ms"],
+    ["straight line", straight.toFixed(0)+" km"],
+    ["going round by", ((run/straight-1)*100).toFixed(0)+"%"]
+  ];
+  document.getElementById("cards").innerHTML = cards.map(function(c){
+    return '<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>';
+  }).join("");
+  draw(p);
+}
+
+function go(){ avoided=[]; show(path(+elFrom.value,+elTo.value,null)); }
+
+/* REROUTE.  Takes the first link of the current path out of the
+   network and finds the best way round it - which is what a
+   carrier does when a cable is cut.  The figures then show what
+   that costs. */
+function reroute(){
+  if(!current||current.length<2){ go(); return; }
+  avoided.push(current[0]+'-'+current[1]);
+  var p=path(+elFrom.value,+elTo.value,avoided);
+  if(!p){ avoided.pop(); alert("no way round that one"); return; }
+  show(p);
+}
+
+document.getElementById("route").onclick=go;
+document.getElementById("reroute").onclick=reroute;
+document.getElementById("csv").onclick=function(){
+  if(!current) return;
+  var rows=[["hop","exchange","lat","lon","leg_km","leg_ms_estimated"]];
+  var i;
+  for(i=0;i<current.length;i++){
+    var leg=i?km(CITY[current[i-1]],CITY[current[i]]):0;
+    rows.push([i,CITY[current[i]][0],CITY[current[i]][1],CITY[current[i]][2],
+               i?leg.toFixed(1):"",i?ms(leg*CABLE_FACTOR).toFixed(3):""]);
+  }
+  var csv=rows.map(function(r){return r.join(",");}).join("\n");
+  var a=document.createElement("a");
+  a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+  a.download="route.csv"; a.click();
+};
+
+document.getElementById("honest").innerHTML =
+  '<b>WHAT IS REAL ON THIS PAGE AND WHAT IS NOT.</b><br><br>'+
+  '<b>Real:</b> the '+CITY.length+' cities and their coordinates, and '+
+  'therefore every distance shown. Great circle, worked out by this '+
+  'page from the coordinates.<br><br>'+
+  '<b>Derived:</b> the times. Light in fibre goes at about two thirds '+
+  'of its speed in vacuum, so 1000 km of cable is about '+
+  ms(1000).toFixed(1)+' ms one way. Cable is longer than the straight '+
+  'line because it follows roads, rail and coast, and '+CABLE_FACTOR+
+  ' times is the allowance made for that. Both are written here so '+
+  'they can be argued with rather than believed.<br><br>'+
+  '<b>Modelled, not observed:</b> which exchange connects to which. '+
+  'No carrier publishes its topology and this page opens no socket, '+
+  'so the '+links.length+' links are built from distance - each '+
+  'exchange joined to its nearest few. That gives a network of the '+
+  'right SHAPE for showing how rerouting behaves. <b>It is not a map '+
+  'of anybody\'s real network</b>, no path here is claimed to exist, '+
+  'and no time on this page was measured on a wire.';
+
+go();
+</script>
+</body></html>
