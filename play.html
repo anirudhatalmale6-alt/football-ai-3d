@@ -80,16 +80,32 @@
      panels all wanted the same space, and the panels sat underneath the touch controls where
      a thumb covers them. On a narrow screen everything informative moves to the TOP and the
      bottom third is left entirely to the hands. */
+  /* THE PHONE LAYOUT.
+   *
+   * The readouts used to be given a top and a width each and left
+   * to fall where they liked, and on a 412 px screen they landed
+   * on top of one another - the telemetry panel sat across the
+   * goal probability and the toast ran through both.  Every panel
+   * was correct on its own and the screen was unreadable.
+   *
+   * They are now laid out as one column down the left under the
+   * cards, with the telemetry held to the right of it and neither
+   * allowed to grow into the other's half.  45 and 50 leaves five
+   * per cent of gap between them at every width. */
   @media (max-width: 620px) {
     .sb div{padding:5px 8px;font-size:12px}
     .cards{top:40px;padding:4px 7px;font-size:10px;gap:5px}
-    .tele{padding:5px 8px;font-size:9px;min-width:118px;right:8px}
-    .tele .row{margin:1px 0;gap:8px}
+    .tele{padding:5px 7px;font-size:9px;min-width:0;max-width:45vw;right:8px}
+    .tele .row{margin:1px 0;gap:6px}
     .tele .row b{font-size:11px}
-    .bot{top:78px;left:8px;bottom:auto;gap:5px;max-width:62vw}
+    .bot{top:74px;left:8px;bottom:auto;gap:5px;max-width:50vw;
+         flex-direction:column;flex-wrap:nowrap}
     .pan{padding:4px 8px;font-size:8px}
     .pan b{font-size:12px}
     .bar{width:64px;height:3px;margin-top:3px}
+    /* Clear of both columns, not across them. */
+    .toast{top:30%;font-size:11px;max-width:90vw;text-align:center}
+    .flash{top:44%}
     .hint{display:none}
   }
 </style>
