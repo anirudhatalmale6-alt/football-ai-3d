@@ -5,7 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI2ORBIT Football AI - Vertical Slice</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
+/* NOT ONE FONT IS FETCHED FROM ANYWHERE.
+   These pages used to @import three families from Google, which meant
+   a page that says it reaches out to nothing was reaching out on every
+   single load - and on a slow phone the text arrived after the game
+   did. The three names the stylesheets ask for are mapped here onto
+   faces the machine already has; if it has none of them the browser
+   falls through to its own, which is the right answer for a page that
+   has to work with no network at all. */
+@font-face{font-family:'Orbitron';font-weight:100 900;
+  src:local('DejaVu Sans Bold'),local('Arial Bold'),local('Helvetica Bold'),
+      local('Roboto Medium'),local('Segoe UI Semibold')}
+@font-face{font-family:'Rajdhani';font-weight:100 900;
+  src:local('DejaVu Sans'),local('Segoe UI'),local('Roboto'),local('Arial'),
+      local('Helvetica')}
+@font-face{font-family:'Share Tech Mono';
+  src:local('DejaVu Sans Mono'),local('Consolas'),local('Menlo'),
+      local('Liberation Mono'),local('Courier New')}
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { height:100%; background:#05070c; overflow:hidden; font-family:'Rajdhani',sans-serif; color:#eaf2ff; }
   #app { position:fixed; inset:0; }
@@ -164,16 +180,17 @@
 <div id="card"><div class="cwrap"><div class="cface"></div><div class="cinfo"><div class="ctxt">YELLOW CARD</div><div class="csub">BOOKED</div></div></div></div>
 <div id="cred">(c) 2026 AI2ORBIT Co. &middot; Vertical Slice v1.1</div>
 
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
-</script>
-<script type="module">
-import * as THREE from 'three';
+<script src="vendor/three.global.js"></script>
+<script src="lib.global.js"></script>
+<script src="gait.js"></script>
+<script src="tech.js"></script>
+<script>
 window.__ai2_ok = true;
 
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+TECH.watch(renderer);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
