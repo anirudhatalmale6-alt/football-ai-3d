@@ -176,6 +176,7 @@
     <b>PAUSE</b><span>P</span>
     <b>ATTRACT</b><span>T &mdash; the engine plays both sides</span>
   </div>
+  <div class="keys" id="pace"></div>
   <button class="btn" id="go">KICK OFF</button>
 </div>
 
@@ -206,6 +207,8 @@
     <div class="row"><span>FPS</span><b id="tFps">--</b></div>
     <div class="row"><span>RESTARTS</span><b id="tRes">--</b></div>
     <div class="row"><span>OFFSIDE</span><b id="tOff">0</b></div>
+    <div class="row"><span>BACK KICKS TRUE</span><b id="tBack">--</b></div>
+    <div class="row"><span>MIDFIELD SHOTS ON GOAL</span><b id="tMid">--</b></div>
     <div class="row rules"><span>RULES</span><b id="tComp">--</b></div>
   </div>
   <div class="bot">
@@ -2480,13 +2483,18 @@ const clamp = (v,a,b) => v < a ? a : (v > b ? b : v);
 const lerp  = (a,b,t) => a + (b-a)*t;
 let rngState = 12345;
 function rnd(){ rngState = (rngState*1664525 + 1013904223) >>> 0; return rngState/4294967296; }
+// THE LOOKS HAVE THEIR OWN GENERATOR. The crowd and each player's skin and hair are drawn from
+// this one, so adding them did not shift a single draw the match itself makes - every pass,
+// shot and tackle comes out exactly as it did before there was a crowd.
+let lookState = 777;
+function rndLook(){ lookState = (lookState*1664525 + 1013904223) >>> 0; return lookState/4294967296; }
 
 // ============================================================================================
 // SCENE
 // ============================================================================================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05070b);
-scene.fog = new THREE.Fog(0x05070b, 90, 190);
+scene.fog = new THREE.Fog(0x05070b, 110, 230);
 
 const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, 0.3, 400);
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
@@ -2549,16 +2557,106 @@ for (const s of [-1, 1]) {
     side.position.set(s*(PITCH_X+0.95), GOAL_Y/2, z); scene.add(side);
   }
 }
-// Stadium wall, so the horizon is not empty space
+// ============================================================================================
+// THE STANDS AND THE CROWD
+// Four tiered stands round the pitch with a crowd in them, red at one end and blue at the other
+// as home and away ends are, mixed along the sides.
+//
+// THE CROWD IS PAINTED, NOT MODELLED. The first version put 5,257 small figures in the stands as
+// one instanced mesh, and the frame rate in the test suite's software renderer fell from 46 to
+// 11 - the crowd alone took two thirds of it. Painted onto one sloping surface per stand it costs
+// four draw calls and almost nothing to fill, and from a broadcast camera it reads the same.
+// A goal still stands one end up: that end flickers between two paintings, seated and arms up.
+// Built from shapes and a canvas, so there is nothing to download and no licence on it.
+// ============================================================================================
+const STAND_ROWS = 10, ROW_RISE = 0.62, ROW_DEPTH = 0.92, SEAT_W = 0.62;
+const crowd = { stands: [], n: 0, cheerTeam: -1, cheerUntil: 0, shown: 0 };
 {
-  const w = new THREE.Mesh(new THREE.BoxGeometry(PITCH_X*2+30, 7, 1),
-                           new THREE.MeshStandardMaterial({color:0x0a1220, roughness:1}));
-  for (const z of [-PITCH_Z-9, PITCH_Z+9]) { const c = w.clone(); c.position.set(0,3.5,z);
-                                             scene.add(c); }
-  const e = new THREE.Mesh(new THREE.BoxGeometry(1, 7, PITCH_Z*2+19),
-                           new THREE.MeshStandardMaterial({color:0x0a1220, roughness:1}));
-  for (const x of [-PITCH_X-14, PITCH_X+14]) { const c = e.clone(); c.position.set(x,3.5,0);
-                                               scene.add(c); }
+  const concrete = new THREE.MeshStandardMaterial({color:0x2a313d, roughness:0.95});
+  const roofMat  = new THREE.MeshStandardMaterial({color:0x10161f, roughness:0.8, side:THREE.DoubleSide});
+  const RED = ['#c0243a', '#d63a4c', '#a81c30', '#8e1526', '#e8e8e8'], BLUE = ['#1e50c8', '#3b6fe0', '#1a44ad', '#123a8e', '#e8e8e8'],
+        MIX = ['#2b2b2b', '#e8e8e8', '#6b5b4b', '#334455'], SKINS = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524'];
+  const PX = 10, PY = 14;                 // pixels per seat across, per row up the slope
+  // Paints one stand: who sits in each seat is decided once (seeded), then drawn twice -
+  // sitting, and with the supporters of `cheerSide` on their feet with their arms up.
+  function paint(nSeats, sideAt, cheerSide, people){
+    const cv = document.createElement('canvas'); cv.width = nSeats*PX; cv.height = STAND_ROWS*PY;
+    const x = cv.getContext('2d');
+    x.fillStyle = '#121822'; x.fillRect(0, 0, cv.width, cv.height);
+    for (const q of people) {
+      if (!q) continue;
+      const up = q.side === cheerSide;
+      // The canvas is laid on the slope with its TOP at the pitch edge, so a person standing
+      // up the slope is drawn with the head BELOW the body in canvas terms.
+      const bx = q.i*PX + 1, by = q.r*PY + (up ? 0 : 2);
+      x.fillStyle = q.shirt; x.fillRect(bx, by, PX - 2, up ? 10 : 9);
+      x.fillStyle = q.skin; x.beginPath(); x.arc(bx + (PX-2)/2, by + (up ? 12 : 11), 2.6, 0, 7); x.fill();
+      if (up) { x.fillStyle = q.shirt; x.fillRect(bx - 1, by - 4, 2, 6); x.fillRect(bx + PX - 3, by - 4, 2, 6); }
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.anisotropy = 4;
+    return t;
+  }
+  function stand(cx, cz, len, outX, outZ, front, endSide){
+    const rotY = Math.atan2(outX, outZ);
+    // ONE PIECE OF CONCRETE PER STAND: the stair profile drawn once and pushed out along the
+    // stand's length, rather than ten boxes - forty draw calls became four.
+    const prof = new THREE.Shape();
+    prof.moveTo(front - ROW_DEPTH/2, 0);
+    for (let r = 0; r < STAND_ROWS; r++) {
+      const y = 0.5 + r*ROW_RISE, d0 = front - ROW_DEPTH/2 + r*ROW_DEPTH;
+      prof.lineTo(d0, y); prof.lineTo(d0 + ROW_DEPTH, y);
+    }
+    prof.lineTo(front - ROW_DEPTH/2 + STAND_ROWS*ROW_DEPTH, 0);
+    const sg = new THREE.ExtrudeGeometry(prof, { depth: len, bevelEnabled: false });
+    sg.translate(0, 0, -len/2);
+    const steps = new THREE.Mesh(sg, concrete);
+    steps.position.set(cx, 0, cz); steps.rotation.y = Math.atan2(-outZ, outX);
+    scene.add(steps);
+    const nSeats = Math.floor(len / SEAT_W), people = [];
+    for (let r = 0; r < STAND_ROWS; r++) for (let i = 0; i < nSeats; i++) {
+      if (rndLook() > 0.88) { people.push(null); continue; }       // a few empty seats
+      // home end red, away end blue, the sides mixed with a lean to each end
+      const along = (i + 0.5)/nSeats*2 - 1;                         // -1..1 along the stand
+      const lean = endSide !== null ? (endSide ? 1 : -1) : along * (outZ > 0 ? -1 : 1);
+      const side = endSide !== null ? endSide : (rndLook() < 0.5 + lean*0.4 ? 1 : 0);
+      const pal = rndLook() < 0.82 ? (side ? BLUE : RED) : MIX;
+      people.push({ i, r, side, shirt: pal[Math.floor(rndLook()*pal.length)],
+                    skin: SKINS[Math.floor(rndLook()*SKINS.length)] });
+      crowd.n++;
+    }
+    const seated = paint(nSeats, null, -1, people);
+    const cheer = [paint(nSeats, null, 0, people), paint(nSeats, null, 1, people)];
+    // UNLIT: under the stadium light the painting came out grey, so it is drawn as painted.
+    const mat = new THREE.MeshBasicMaterial({ map: seated, color: 0xdddddd });
+    const slopeLen = Math.hypot(STAND_ROWS*ROW_DEPTH, STAND_ROWS*ROW_RISE), alpha = Math.atan2(ROW_RISE, ROW_DEPTH);
+    const g = new THREE.Group();
+    const dMid = front + (STAND_ROWS - 1)*ROW_DEPTH/2, yMid = 0.5 + (STAND_ROWS - 1)*ROW_RISE/2 + 0.35;
+    g.position.set(cx + outX*dMid, yMid, cz + outZ*dMid); g.rotation.y = rotY;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(len, slopeLen), mat);
+    plane.rotation.x = -Math.PI/2 - alpha;           // lying on the slope, facing up and in
+    g.add(plane); scene.add(g);
+    crowd.stands.push({ mat, seated, cheer });
+    const back = front + STAND_ROWS*ROW_DEPTH;
+    const roof = new THREE.Mesh(new THREE.PlaneGeometry(len, STAND_ROWS*ROW_DEPTH + 3), roofMat);
+    roof.position.set(cx + outX*(front + back)/2, 0.5 + STAND_ROWS*ROW_RISE + 4.2, cz + outZ*(front + back)/2);
+    roof.rotation.order = 'YXZ'; roof.rotation.y = rotY; roof.rotation.x = -Math.PI/2 + 0.12;
+    scene.add(roof);
+  }
+  stand(0, -PITCH_Z-6, PITCH_X*2+8, 0, -1, 0, null);
+  stand(0,  PITCH_Z+6, PITCH_X*2+8, 0,  1, 0, null);
+  stand(-PITCH_X-9, 0, PITCH_Z*2+4, -1, 0, 0, 0);      // red end
+  stand( PITCH_X+9, 0, PITCH_Z*2+4,  1, 0, 0, 1);      // blue end
+}
+// A GOAL STANDS ONE END UP for three seconds: every stand flickers, five times a second,
+// between its seated painting and the one with the scoring side's supporters on their feet.
+function crowdCheer(team){ crowd.cheerTeam = team; crowd.cheerUntil = G.t + 3; }
+function updateCrowd(){
+  const on = G.t < crowd.cheerUntil;
+  const want = on ? (Math.floor(G.t*5) % 2 ? 2 + crowd.cheerTeam : 1) : 1;
+  if (want === crowd.shown) return;
+  crowd.shown = want;
+  for (const st of crowd.stands) { st.mat.map = want === 1 ? st.seated : st.cheer[want - 2]; st.mat.needsUpdate = true; }
 }
 
 // ============================================================================================
@@ -2578,12 +2676,36 @@ const MATS = {
 // Geometry is shared between all 22 players. 286 meshes with 286 geometries would be an
 // avoidable cost on a phone; this way the GPU uploads each shape once.
 const GEO = {
-  hips:  new THREE.BoxGeometry(0.42, 0.22, 0.26),
-  torso: new THREE.BoxGeometry(0.46, 0.56, 0.28),
-  neck:  new THREE.CylinderGeometry(0.07, 0.08, 0.08, 6),
-  head:  new THREE.SphereGeometry(0.135, 12, 10),
-  boot:  new THREE.BoxGeometry(0.13, 0.07, 0.26),
+  // THE NEW PLAYERS. Rounded rather than boxed: a torso wider at the shoulders than the waist,
+  // shorts that wrap the hips, short sleeves, hair, team socks and a number on the back. The
+  // joints are exactly where they were, so the run cycle in gait.js drives them unchanged.
+  hips:  new THREE.CylinderGeometry(0.205, 0.215, 0.24, 12).scale(1, 1, 0.68),
+  torso: new THREE.CylinderGeometry(0.24, 0.185, 0.56, 12).scale(1, 1, 0.6),
+  neck:  new THREE.CylinderGeometry(0.065, 0.075, 0.09, 8),
+  head:  new THREE.SphereGeometry(0.128, 14, 12).scale(1, 1.1, 1.02),
+  hair:  new THREE.SphereGeometry(0.136, 14, 8, 0, Math.PI*2, 0, Math.PI*0.52).scale(1, 1.08, 1.04),
+  boot:  new THREE.BoxGeometry(0.12, 0.075, 0.27),
+  number:new THREE.PlaneGeometry(0.24, 0.24),
 };
+const SKIN = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0x6b3e1f]
+  .map(c => new THREE.MeshStandardMaterial({color:c, roughness:0.78}));
+const HAIR = [0x16110d, 0x3b2a1a, 0x6b4a2a, 0xb88a4a, 0x0b0b0b, 0x2a1d14]
+  .map(c => new THREE.MeshStandardMaterial({color:c, roughness:0.9}));
+const SOCKS = [new THREE.MeshStandardMaterial({color:0xf4f4f4, roughness:0.72}),
+               new THREE.MeshStandardMaterial({color:0x0e2a6e, roughness:0.72})];
+// Shirt numbers, drawn once each on a small canvas. A number, never a name.
+const SHIRT = [1, 3, 4, 5, 2, 6, 8, 10, 11, 9, 7];
+const NUMBER_MAT = {};
+function numberMat(n){
+  if (NUMBER_MAT[n]) return NUMBER_MAT[n];
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const x = cv.getContext('2d');
+  x.font = 'bold 46px Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.lineWidth = 5; x.strokeStyle = 'rgba(0,0,0,0.55)'; x.strokeText(String(n), 32, 35);
+  x.fillStyle = '#ffffff'; x.fillText(String(n), 32, 35);
+  const t = new THREE.CanvasTexture(cv);
+  return NUMBER_MAT[n] = new THREE.MeshBasicMaterial({map:t, transparent:true, depthWrite:false});
+}
 function limbGeo(len, rTop, rBot){
   const g = new THREE.CylinderGeometry(rTop, rBot, len, 7);
   g.translate(0, -len/2, 0);            // the JOINT sits at the origin, the bone hangs below
@@ -2593,11 +2715,18 @@ GEO.upperArm = limbGeo(0.30, 0.062, 0.052);
 GEO.foreArm  = limbGeo(0.30, 0.052, 0.044);
 GEO.thigh    = limbGeo(0.42, 0.085, 0.068);
 GEO.shin     = limbGeo(0.40, 0.062, 0.048);
+// Short sleeves and the legs of the shorts: wider, shorter tubes over the top of the limb, so
+// the arm and the thigh show skin below them as they do on a real kit.
+GEO.sleeve   = limbGeo(0.15, 0.075, 0.068);
+GEO.shortLeg = limbGeo(0.22, 0.098, 0.09);
 
 const blobGeo = new THREE.CircleGeometry(0.42, 14);
 const blobMat = new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.3});
 
-function buildRig(kit, shorts){
+function buildRig(kit, shorts, look){
+  look = look || {};
+  const skin = SKIN[look.skin || 0], hairM = HAIR[look.hair || 0];
+  const sock = SOCKS[look.sock || 0];
   const root = new THREE.Group();
   const blob = new THREE.Mesh(blobGeo, blobMat);
   blob.rotation.x = -Math.PI/2; blob.position.y = 0.015; root.add(blob);
@@ -2605,21 +2734,29 @@ function buildRig(kit, shorts){
   const hips = new THREE.Mesh(GEO.hips, shorts); hips.position.y = 0.92; root.add(hips);
   const chest = new THREE.Group(); chest.position.y = 0.11; hips.add(chest);
   const torso = new THREE.Mesh(GEO.torso, kit); torso.position.y = 0.28; chest.add(torso);
-  const neck = new THREE.Mesh(GEO.neck, MATS.skin); neck.position.y = 0.60; chest.add(neck);
-  const head = new THREE.Mesh(GEO.head, MATS.skin); head.position.y = 0.73; chest.add(head);
+  const neck = new THREE.Mesh(GEO.neck, skin); neck.position.y = 0.60; chest.add(neck);
+  const head = new THREE.Mesh(GEO.head, skin); head.position.y = 0.74; chest.add(head);
+  const hair = new THREE.Mesh(GEO.hair, hairM); hair.position.y = 0.012; hair.rotation.x = -0.18; head.add(hair);
+  if (look.number) {
+    const num = new THREE.Mesh(GEO.number, numberMat(look.number));
+    num.position.set(0, 0.32, -0.152); num.rotation.y = Math.PI; chest.add(num);
+  }
 
   const arms = [], legs = [];
   for (const side of [-1, 1]) {
     const sh = new THREE.Group(); sh.position.set(side*0.27, 0.5, 0); chest.add(sh);
-    sh.add(new THREE.Mesh(GEO.upperArm, kit));
+    sh.add(new THREE.Mesh(GEO.upperArm, skin));
+    sh.add(new THREE.Mesh(GEO.sleeve, kit));
     const el = new THREE.Group(); el.position.y = -0.30; sh.add(el);
-    el.add(new THREE.Mesh(GEO.foreArm, MATS.skin));
+    el.add(new THREE.Mesh(GEO.foreArm, skin));
+
     arms.push({sh, el, side});
 
     const hip = new THREE.Group(); hip.position.set(side*0.13, -0.10, 0); hips.add(hip);
-    hip.add(new THREE.Mesh(GEO.thigh, shorts));
+    hip.add(new THREE.Mesh(GEO.thigh, skin));
+    hip.add(new THREE.Mesh(GEO.shortLeg, shorts));
     const kn = new THREE.Group(); kn.position.y = -0.42; hip.add(kn);
-    kn.add(new THREE.Mesh(GEO.shin, MATS.sock));
+    kn.add(new THREE.Mesh(GEO.shin, sock));
     const an = new THREE.Group(); an.position.y = -0.40; kn.add(an);
     const bo = new THREE.Mesh(GEO.boot, MATS.boot); bo.position.set(0,-0.035,0.05); an.add(bo);
     legs.push({hip, kn, an, side});
@@ -2644,13 +2781,105 @@ const FORM = [   // 4-3-3 as fractions of half the pitch, from own goal outwards
 ];
 const NAMES = ['GK','LB','CB','CB','RB','CM','CM','CM','LW','ST','RW'];
 
+/* ==============================================================
+   THE PACE OF EACH ROLE, from the 100 m times given for it:
+   fastest 11 s, slowest 14 s.
+
+     GK 14,0   CB 13,0   FB 12,0   CM 12,5   W 11,5   ST 11,0
+
+   A 100 m time is not a top speed. It includes getting going
+   from standing, and in this engine it also includes the
+   sprint wearing the legs down - stamina falls while a player
+   sprints, and a tired player is capped lower. So each role's
+   top speed is SOLVED: the page runs a fresh player 100 m
+   through the very same movement code the match uses, and
+   searches for the top speed that makes that run take the
+   given time. The times are then a property of the game and
+   not a number written beside it.
+   ============================================================== */
+const ROLE = ['GK','FB','CB','CB','FB','CM','CM','CM','W','ST','W'];
+const T100 = { GK:14.0, CB:13.0, FB:12.0, CM:12.5, W:11.5, ST:11.0 };
+const SPRINT_X = 1.25;
+const DASH_DT = 1/60;
+// One frame of movement for one player. The match and the 100 m dash both come through here,
+// so the dash measures the game and cannot drift away from it.
+function moveStep(p, want, sprint, dt){
+  const cap = p.speedCap * (sprint ? SPRINT_X : 1) * (p.tackle > 0 ? 0.4 : 1);
+  p.stamina = clamp(p.stamina + (sprint ? -dt*0.055 : dt*0.035), 0.15, 1);
+  const desX = want.x * cap * (want.m || 0), desZ = want.z * cap * (want.m || 0);
+  const accel = 14 * dt;
+  p.vel.x += clamp(desX - p.vel.x, -accel, accel);
+  p.vel.y += clamp(desZ - p.vel.y, -accel, accel);
+  p.vel.multiplyScalar(1 - 2.4*dt*(want.m ? 0.15 : 1));
+  p.pos.x = clamp(p.pos.x + p.vel.x*dt, -PITCH_X-2, PITCH_X+2);
+  p.pos.y = clamp(p.pos.y + p.vel.y*dt, -PITCH_Z-1, PITCH_Z+1);
+}
+// 100 m from standing, flat out, a fresh player whose sprint top is `top`. Returns seconds,
+// with the finishing frame interpolated so the answer is not rounded to a sixtieth.
+function dash(top){
+  const p = { top, stamina: 1, tackle: 0, pos: new THREE.Vector2(-50, 0), vel: new THREE.Vector2(0, 0),
+              get speedCap(){ return this.top / SPRINT_X * (0.72 + 0.28*this.stamina); } };
+  const want = { x: 1, z: 0, m: 1 };
+  let t = 0;
+  while (t < 60) {
+    const x0 = p.pos.x;
+    moveStep(p, want, true, DASH_DT); t += DASH_DT;
+    if (p.pos.x >= 50) return t - DASH_DT * (p.pos.x - 50) / (p.pos.x - x0);
+  }
+  return Infinity;
+}
+const ROLE_TOP = {};
+for (const r in T100) {
+  let lo = 4, hi = 20;                   // a slower top speed gives a longer time: bisect
+  for (let i = 0; i < 60; i++) { const mid = (lo + hi)/2; if (dash(mid) > T100[r]) lo = mid; else hi = mid; }
+  ROLE_TOP[r] = (lo + hi)/2;
+}
+
+/* ==============================================================
+   TWO RATES, as given:
+     BACK KICK 90 %   a pass or clearance by the goalkeeper or a
+                      back four player goes where it was aimed
+                      nine times in ten. The tenth is struck 12 to
+                      25 degrees off line, either side.
+     MIDDLE BALL TO GOAL 45 %   a shot by a central midfielder
+                      is on target 45 times in a hundred: inside
+                      the posts and under the bar. The rest are
+                      struck wide of a post.
+   Every kick of both kinds is counted on the screen, so the
+   rates can be read off a match rather than trusted.
+   ============================================================== */
+const BACK_TRUE = 0.90, MID_ON_GOAL = 0.45;
+const KICKS = { back: { n: 0, ok: 0, last: null }, mid: { n: 0, on: 0, last: null } };
+const isBack = p => p.idx <= 4;
+const isMid  = p => p.idx >= 5 && p.idx <= 7;
+// A back kick's aim, after the 90 % draw. Returns the direction actually struck.
+function backAim(p, dx, dz){
+  if (!isBack(p)) return [dx, dz];
+  KICKS.back.n++;
+  const good = rnd() < BACK_TRUE;
+  let ax = dx, az = dz;
+  if (good) KICKS.back.ok++;
+  else {
+    const a = (0.21 + rnd()*0.23) * (rnd() < 0.5 ? -1 : 1), c = Math.cos(a), s = Math.sin(a);
+    ax = dx*c - dz*s; az = dx*s + dz*c;
+  }
+  KICKS.back.last = { good, want: Math.atan2(dz, dx), struck: Math.atan2(az, ax) };
+  return [ax, az];
+}
+
 class Player {
   constructor(team, idx){
     this.team = team;                 // 0 = ATL (red, attacks +x), 1 = ORB (blue, attacks -x)
     this.idx = idx;
     this.gk = idx === 0;
     const kit = this.gk ? (team ? MATS.kitGB : MATS.kitGA) : (team ? MATS.kitB : MATS.kitA);
-    this.rig = buildRig(kit, team ? MATS.shB : MATS.shA);
+    // Each player looks like himself: skin and hair drawn once from the seeded generator, so
+    // the same player looks the same on every load. Team socks, and the shirt number.
+    this.rig = buildRig(kit, team ? MATS.shB : MATS.shA,
+                        { skin: Math.floor(rndLook()*SKIN.length), hair: Math.floor(rndLook()*HAIR.length),
+                          sock: team, number: SHIRT[idx] });
+    this.role = ROLE[idx];
+    this.top = ROLE_TOP[this.role];
     scene.add(this.rig.root);
     this.pos = new THREE.Vector2(0,0);
     this.vel = new THREE.Vector2(0,0);
@@ -2679,9 +2908,10 @@ class Player {
       clamp(this.dir*(f[0]*PITCH_X) + shift, -PITCH_X+2, PITCH_X-2),
       clamp(f[1]*PITCH_Z, -PITCH_Z+2, PITCH_Z-2));
   }
+  // The cruising cap. A sprint is SPRINT_X times this, and the sprint top is the role's own,
+  // set so that a fresh player covers 100 m in the time given for his role.
   get speedCap(){
-    const base = this.gk ? 6.2 : 7.2;
-    return base * (0.72 + 0.28*this.stamina);
+    return this.top / SPRINT_X * (0.72 + 0.28*this.stamina);
   }
 }
 
@@ -2937,10 +3167,10 @@ function bestPassTarget(p){
 function doPass(p){
   if (ball.owner !== p || p.cooldown > 0) return;
   const q = bestPassTarget(p);
-  if (!q) { kickBall(p, p.dir, 0, 14, 1.2); p.cooldown = 0.3; return; }
+  if (!q) { const [bx, bz] = backAim(p, p.dir, 0); kickBall(p, bx, bz, 14, 1.2); p.cooldown = 0.3; return; }
   const d = p.pos.distanceTo(q.pos);
   // Lead the receiver: aim where they will be, not where they are.
-  const ax = q.pos.x + q.vel.x*0.35 - p.pos.x, az = q.pos.y + q.vel.y*0.35 - p.pos.y;
+  const [ax, az] = backAim(p, q.pos.x + q.vel.x*0.35 - p.pos.x, q.pos.y + q.vel.y*0.35 - p.pos.y);
   kickBall(p, ax, az, clamp(d*1.05, 9, 26), d > 22 ? 2.6 : 0.5);
   p.cooldown = 0.3;
 }
@@ -2952,8 +3182,18 @@ function doShoot(p, power){
   // 1.00 inside six metres, so a measured four-shot spell produced three goals and one miss and
   // the goal line Laws almost never came up.
   const acc = clamp(1 - d/50, 0.26, 0.96);
-  const sx = gx - p.pos.x + (rnd()-0.5)*(1-acc)*16;
-  const sz = gz - p.pos.y + (rnd()-0.5)*(1-acc)*14;
+  let sx = gx - p.pos.x + (rnd()-0.5)*(1-acc)*16;
+  let sz = gz - p.pos.y + (rnd()-0.5)*(1-acc)*14;
+  if (isMid(p)) {
+    // MIDDLE BALL TO GOAL: on target 45 in 100, decided here and then struck exactly - the
+    // aim point is inside the posts, or wide of one, and nothing scatters it afterwards.
+    const on = rnd() < MID_ON_GOAL;
+    const tz = on ? (rnd()*2 - 1) * (GOAL_Z - 0.45)
+                  : (rnd() < 0.5 ? -1 : 1) * (GOAL_Z + 0.8 + rnd()*3.5);
+    sx = gx - p.pos.x; sz = tz - p.pos.y;
+    KICKS.mid.n++; if (on) KICKS.mid.on++;
+    KICKS.mid.last = { on, aimZ: tz, goalX: gx };
+  }
   kickBall(p, sx, sz, clamp(19 + power*11, 19, 31), clamp(d*0.07, 0.6, 3.4));
   p.cooldown = 0.45;
   G.shots[p.team]++;
@@ -3517,12 +3757,12 @@ function think(p, dt){
       if (veryDeep && rnd() < 0.45) {
         const ownGoalX = -p.dir*(PITCH_X + 2);
         const wide = (Math.sign(p.pos.y) || 1) * (GOAL_Z + 6);
-        kickBall(p, ownGoalX - p.pos.x, wide - p.pos.y, 15, 2.2);
+        { const [cx, cz] = backAim(p, ownGoalX - p.pos.x, wide - p.pos.y); kickBall(p, cx, cz, 15, 2.2); }
         p.cooldown = 0.5;
         return {x:0, z:0, m:0};
       }
       const tz = (Math.sign(p.pos.y) || 1) * (PITCH_Z + 1.5);
-      kickBall(p, p.dir*38, tz - p.pos.y, 27, 3.6);
+      { const [cx, cz] = backAim(p, p.dir*38, tz - p.pos.y); kickBall(p, cx, cz, 27, 3.6); }
       p.cooldown = 0.5;
       return {x:0, z:0, m:0};
     }
@@ -3588,15 +3828,7 @@ function step(dt){
       sprint = want.m > 0.9 && p.stamina > 0.3;
     }
 
-    const cap = p.speedCap * (sprint ? 1.25 : 1) * (p.tackle > 0 ? 0.4 : 1);
-    p.stamina = clamp(p.stamina + (sprint ? -dt*0.055 : dt*0.035), 0.15, 1);
-    const desX = want.x * cap * (want.m || 0), desZ = want.z * cap * (want.m || 0);
-    const accel = 14 * dt;
-    p.vel.x += clamp(desX - p.vel.x, -accel, accel);
-    p.vel.y += clamp(desZ - p.vel.y, -accel, accel);
-    p.vel.multiplyScalar(1 - 2.4*dt*(want.m ? 0.15 : 1));
-    p.pos.x = clamp(p.pos.x + p.vel.x*dt, -PITCH_X-2, PITCH_X+2);
-    p.pos.y = clamp(p.pos.y + p.vel.y*dt, -PITCH_Z-1, PITCH_Z+1);
+    moveStep(p, want, sprint, dt);
     const sp = p.vel.length();
     if (sp > 0.35) p.face = Math.atan2(p.vel.x, p.vel.y);
 
@@ -3756,6 +3988,7 @@ function step(dt){
         afterBall(dt); return;
       }
       G.score[scorer]++;
+      crowdCheer(scorer);
       if (G.advantage) { G.advantage = null; G.counts.advantagePlayed++; }
       toast('GOAL'); setRef('GOAL');
       resetPositions(1-scorer);
@@ -3864,7 +4097,15 @@ function updateCamera(dt){
 const el = id => document.getElementById(id);
 let hudT = 0;
 function updateHUD(dt){
+  updateCrowd();
   hudT += dt; if (hudT < 0.1) return; hudT = 0;
+  // THE STATES PANEL SITS UNDER THE TELEMETRY, wherever the telemetry ends. Two rows added to
+  // the telemetry pushed it down over the states panel, which had a fixed top; now the panel
+  // reads where the one above it really finishes, at any screen size.
+  { const tb = document.querySelector('.tele').getBoundingClientRect(), st = document.querySelector('.states');
+    if (tb.height) st.style.top = Math.round(tb.bottom + 8) + 'px'; }
+  el('tBack').textContent = KICKS.back.n ? Math.round(KICKS.back.ok/KICKS.back.n*100) + '% OF ' + KICKS.back.n : '--';
+  el('tMid').textContent = KICKS.mid.n ? Math.round(KICKS.mid.on/KICKS.mid.n*100) + '% OF ' + KICKS.mid.n : '--';
   el('score').textContent = G.score[0] + ' - ' + G.score[1];
   const s = Math.floor(G.t);
   el('clock').textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' +
@@ -3972,6 +4213,8 @@ function startMatch(){
   G.running = true; G.paused = false; G.over = false;
   G.half = 1; G.t = 0; G.score = [0,0]; G.shots = [0,0];
   G.cards = {g:0,y:0,r:0,b:0}; G.posCount = [1,1];
+  for (const k of ['back', 'mid']) { KICKS[k].n = 0; KICKS[k].last = null; }
+  KICKS.back.ok = 0; KICKS.mid.on = 0;
   for (const k in G.counts) G.counts[k] = 0;
   for (const p of all) { p.off = false; p.cards = 0; p.stamina = 1; p.holding = 0;
                          p.rig.root.visible = true; }
@@ -3981,6 +4224,17 @@ function startMatch(){
   toast('KICK OFF');
 }
 document.getElementById('go').onclick = startMatch;
+{
+  const names = { GK:'GOALKEEPER', CB:'CENTRE BACK', FB:'FULL BACK', CM:'MIDFIELD', W:'WINGER', ST:'STRIKER' };
+  const box = document.getElementById('pace');
+  for (const r of ['ST','W','FB','CM','CB','GK']) {
+    const b = document.createElement('b'); b.textContent = names[r];
+    const s = document.createElement('span');
+    s.textContent = '100 M IN ' + dash(ROLE_TOP[r]).toFixed(2).replace('.', ',') + ' S, TOP '
+                  + (ROLE_TOP[r]*3.6).toFixed(1).replace('.', ',') + ' KM/H';
+    box.appendChild(b); box.appendChild(s);
+  }
+}
 document.getElementById('again').onclick = startMatch;
 
 addEventListener('resize', () => {
@@ -3992,7 +4246,50 @@ resetPositions(0);
 // A deliberate, documented test hook. Everything an automated check needs to assert on is
 // here, so a check can measure the game rather than guess at pixels.
 window.__game = {
-  G, ball, teams, all,
+  G, ball, teams, all, camera, scene, renderer,
+  // ---- pace and the two rates
+  pace: () => { const o = {}; for (const r in T100) o[r] = { want: T100[r], top: ROLE_TOP[r], dash: dash(ROLE_TOP[r]) }; return o; },
+  kicks: () => JSON.parse(JSON.stringify(KICKS)),
+  crowd: () => ({ n: crowd.n, stands: crowd.stands.length, cheering: G.t < crowd.cheerUntil, team: crowd.cheerTeam, shown: crowd.shown }),
+  cheer: (team) => crowdCheer(team),
+  numbers: () => { let n = 0; scene.traverse(o => { if (o.isMesh && o.geometry === GEO.number) n++; }); return n; },
+  offLineDegrees: (n) => {               // how far off line the missed back kicks really went
+    const lb = teams[0][1], out = [];
+    while (out.length < n) {
+      lb.pos.set(-30, -10); lb.cooldown = 0; ball.owner = lb; ball.pos.set(lb.pos.x, 0.11, lb.pos.y);
+      doPass(lb);
+      const L = KICKS.back.last;
+      if (!L.good) { const st = Math.atan2(ball.vel.z, ball.vel.x);
+        out.push(Math.abs(Math.atan2(Math.sin(st - L.want), Math.cos(st - L.want))) * 180 / Math.PI); }
+    }
+    ball.owner = null; ball.vel.set(0, 0, 0);
+    return out;
+  },
+  // Strikes n real back passes from the left back and n real shots from a midfielder, through
+  // doPass and doShoot themselves, and reports what the BALL did - its direction - so the rates
+  // are measured on kicks rather than on the dice.
+  sampleKicks: (n) => {
+    const out = { back: { n: 0, ok: 0, offLine: 0, badSplit: 0 }, mid: { n: 0, on: 0, badSplit: 0 } };
+    const lb = teams[0][1], cm = teams[0][6];
+    for (let i = 0; i < n; i++) {
+      lb.pos.set(-30, -10); lb.cooldown = 0; ball.owner = lb; ball.pos.set(lb.pos.x, 0.11, lb.pos.y);
+      doPass(lb);
+      const L = KICKS.back.last, struck = Math.atan2(ball.vel.z, ball.vel.x);
+      const off = Math.abs(Math.atan2(Math.sin(struck - L.want), Math.cos(struck - L.want)));
+      out.back.n++; if (off < 0.01) out.back.ok++; else out.back.offLine++;
+      if ((off < 0.01) !== L.good) out.back.badSplit++;
+      cm.pos.set(20, 4); cm.cooldown = 0; ball.owner = cm; ball.pos.set(cm.pos.x, 0.11, cm.pos.y);
+      doShoot(cm, 0.5);
+      const M = KICKS.mid.last;
+      // where the ball's straight path crosses the goal line
+      const zc = cm.pos.y + ball.vel.z / ball.vel.x * (M.goalX - cm.pos.x);
+      const on = Math.abs(zc) < GOAL_Z;
+      out.mid.n++; if (on) out.mid.on++;
+      if (on !== M.on) out.mid.badSplit++;
+    }
+    ball.owner = null; ball.vel.set(0, 0, 0);
+    return out;
+  },
   start: startMatch,
   // The resolved competition profile, so a check can assert that a URL actually changed the
   // rules the match is being played under rather than only the label on the screen.

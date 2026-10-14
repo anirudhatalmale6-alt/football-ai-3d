@@ -768,6 +768,53 @@ def serve_here():
     return "http://127.0.0.1:%d" % httpd.server_address[1]
 
 
+def run_pace_and_look(url):
+    """The 14 Oct round: the pace of each role from its 100 m time, the two kick rates, the new
+    players and the crowd. Each claim is measured on the game itself through window.__game."""
+    print("\n--- pace, kick rates, players and crowd")
+    with sync_playwright() as pw:
+        b = pw.chromium.launch()
+        page = b.new_page(viewport={"width": 1280, "height": 720})
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(url)
+        page.wait_for_function("() => window.__game")
+        pace = page.evaluate("() => window.__game.pace()")
+        for r, want in (("ST", 11.0), ("W", 11.5), ("FB", 12.0), ("CM", 12.5), ("CB", 13.0), ("GK", 14.0)):
+            got = pace[r]["dash"]
+            chk(abs(got - want) < 0.01, "%s covers 100 m from standing in %.3f s (given %.1f s)" % (r, got, want))
+        chk(pace["ST"]["top"] > pace["GK"]["top"], "the striker is faster than the goalkeeper")
+        k = page.evaluate("() => window.__game.sampleKicks(4000)")
+        rb = k["back"]["ok"] / k["back"]["n"]
+        chk(abs(rb - 0.90) < 0.015, "back kicks go true %.1f %% of 4000, given 90 %%" % (rb * 100))
+        chk(k["back"]["badSplit"] == 0, "every true back kick left on its aim line and every miss did not")
+        offs = page.evaluate("() => window.__game.offLineDegrees(200)")
+        chk(min(offs) >= 11.9 and max(offs) <= 25.5,
+            "a missed back kick goes %.1f to %.1f degrees off line (12 to 25 set)" % (min(offs), max(offs)))
+        rm = k["mid"]["on"] / k["mid"]["n"]
+        chk(abs(rm - 0.45) < 0.02, "midfield shots are on target %.1f %% of 4000, given 45 %%" % (rm * 100))
+        chk(k["mid"]["badSplit"] == 0, "every shot counted on target crosses the line inside the posts")
+        c = page.evaluate("() => window.__game.crowd()")
+        chk(c["stands"] == 4 and c["n"] > 4000, "four stands with a crowd of %d" % c["n"])
+        chk(page.evaluate("() => window.__game.numbers()") == 22, "all 22 players have a number on the back")
+        page.click("#go")
+        time.sleep(0.4)
+        chk(page.evaluate("() => document.getElementById('tBack').textContent") == "--",
+            "the kick counters start from nothing at kick off")
+        page.evaluate("() => window.__game.cheer(1)")
+        seen = set()
+        for _ in range(14):
+            seen.add(page.evaluate("() => window.__game.crowd().shown"))
+            time.sleep(0.09)
+        chk(seen == {1, 3}, "a goal stands the scoring end up and sits it down again (%s)" % sorted(seen))
+        r = page.evaluate("""() => { const a = document.querySelector('.tele').getBoundingClientRect(),
+                                           b = document.querySelector('.states').getBoundingClientRect();
+                                     return [a.bottom, b.top]; }""")
+        chk(r[1] >= r[0], "the states panel sits below the telemetry (%.0f, %.0f)" % (r[0], r[1]))
+        chk(not errors, "no page error")
+        b.close()
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     url = args[0] if args else serve_here() + "/play.html"
@@ -782,6 +829,7 @@ def main():
         return 1 if FAIL[0] else 0
     run(url, "desktop, keyboard")
     run(url, "phone viewport, touch", mobile=True)
+    run_pace_and_look(url)
     # The profile section needs to load the page under several query strings, so it takes the
     # base address rather than a finished URL. Skipped when a URL was passed in by hand.
     if not args:
