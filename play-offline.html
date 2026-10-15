@@ -40,6 +40,10 @@
        color:#fff;background:linear-gradient(180deg,#2f7ef0,#1a56c4);border:0;border-radius:8px;
        padding:15px 42px;cursor:pointer;box-shadow:0 0 32px rgba(47,126,240,.45)}
   .btn:active{transform:translateY(1px)}
+  .opts{display:flex;flex-wrap:wrap;gap:5px}
+  .opts a{border:1px solid #2b6ea8;border-radius:4px;padding:2px 7px;font-size:11px;color:#cfe3f5;cursor:pointer;
+    user-select:none;letter-spacing:.04em}
+  .opts a.on{background:#1d5d96;color:#fff}
   .keys{display:grid;grid-template-columns:auto auto;gap:5px 16px;font-size:13px;
         color:#9dbde0;margin-bottom:24px}
   .keys b{font-family:Orbitron,sans-serif;color:#dbe9ff;font-weight:700;text-align:right}
@@ -177,6 +181,10 @@
     <b>ATTRACT</b><span>T &mdash; the engine plays both sides</span>
   </div>
   <div class="keys" id="pace"></div>
+  <div class="keys" id="look">
+    <b>KIT</b><span class="opts" id="optKit"></span>
+    <b>SURFACE</b><span class="opts" id="optSurf"></span>
+  </div>
   <button class="btn" id="go">KICK OFF</button>
 </div>
 
@@ -209,6 +217,7 @@
     <div class="row"><span>OFFSIDE</span><b id="tOff">0</b></div>
     <div class="row"><span>BACK KICKS TRUE</span><b id="tBack">--</b></div>
     <div class="row"><span>MIDFIELD SHOTS ON GOAL</span><b id="tMid">--</b></div>
+    <div class="row"><span>SURFACE</span><b id="tSurf">--</b></div>
     <div class="row rules"><span>RULES</span><b id="tComp">--</b></div>
   </div>
   <div class="bot">
@@ -2509,8 +2518,31 @@ sun.position.set(40, 70, 30);
 scene.add(sun);
 
 // The pitch. Stripes are separate planes rather than a texture so there is nothing to load.
-const grassA = new THREE.MeshStandardMaterial({color:0x1e7a36, roughness:0.97});
-const grassB = new THREE.MeshStandardMaterial({color:0x239140, roughness:0.97});
+/* ==============================================================
+   THE SURFACE. Three lawns, each with its own look and its own
+   ball: how fast a rolling ball loses speed, and how much of a
+   bounce it keeps. Natural grass keeps exactly the values the
+   match was built and tested on; the hybrid and the artificial
+   turf run the ball further and bounce it higher, as those
+   surfaces do. The figures are set here, not measured on a real
+   pitch, and the names are generic - no product is named.
+   ============================================================== */
+const SURF = [
+  { name: 'NATURAL GRASS',   a: 0x1e7a36, b: 0x239140, roll: 1.05, bounce: 0.42 },
+  { name: 'HYBRID GRASS',    a: 0x22833a, b: 0x288f43, roll: 0.92, bounce: 0.47 },
+  { name: 'ARTIFICIAL TURF', a: 0x2a9944, b: 0x2c9d47, roll: 0.78, bounce: 0.55 },
+];
+/* THE KITS: shirt, shorts and the side panel, for each side. */
+const KITS = [
+  { name: 'RED AND BLUE',      a: ['#c0243a', '#6e0e1c', '#f2f2f2'], b: ['#1e50c8', '#0e2a6e', '#f2f2f2'] },
+  { name: 'WHITE AND BLACK',   a: ['#ececec', '#1b1b1b', '#c0243a'], b: ['#1d1d1d', '#2a2a2a', '#f5b821'] },
+  { name: 'YELLOW AND GREEN',  a: ['#f2c318', '#1b1b1b', '#1b1b1b'], b: ['#1f8a4c', '#f2f2f2', '#f2f2f2'] },
+  { name: 'ORANGE AND PURPLE', a: ['#ef7a1a', '#2a2a2a', '#f2f2f2'], b: ['#6b3fa0', '#2a1b4a', '#f2f2f2'] },
+];
+const pickInt = (v, n) => { const k = parseInt(v, 10); return k >= 0 && k < n ? k : 0; };
+let surfN = pickInt(Q.get('surface'), SURF.length), kitN = pickInt(Q.get('kit'), KITS.length);
+const grassA = new THREE.MeshStandardMaterial({color:SURF[surfN].a, roughness:0.97});
+const grassB = new THREE.MeshStandardMaterial({color:SURF[surfN].b, roughness:0.97});
 for (let i = 0; i < 16; i++) {
   const w = (PITCH_X*2+16)/16;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, PITCH_Z*2+14), i%2?grassA:grassB);
@@ -2595,6 +2627,7 @@ const crowd = { stands: [], n: 0, cheerTeam: -1, cheerUntil: 0, shown: 0 };
     }
     const t = new THREE.CanvasTexture(cv);
     t.anisotropy = 4;
+    t.colorSpace = THREE.SRGBColorSpace;     // the crowd's colours were washed out without this
     return t;
   }
   function stand(cx, cz, len, outX, outZ, front, endSide){
@@ -2684,8 +2717,8 @@ const GEO = {
   neck:  new THREE.CylinderGeometry(0.065, 0.075, 0.09, 8),
   head:  new THREE.SphereGeometry(0.128, 14, 12).scale(1, 1.1, 1.02),
   hair:  new THREE.SphereGeometry(0.136, 14, 8, 0, Math.PI*2, 0, Math.PI*0.52).scale(1, 1.08, 1.04),
+  hairBack: new THREE.BoxGeometry(0.21, 0.16, 0.06),
   boot:  new THREE.BoxGeometry(0.12, 0.075, 0.27),
-  number:new THREE.PlaneGeometry(0.24, 0.24),
 };
 const SKIN = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0x6b3e1f]
   .map(c => new THREE.MeshStandardMaterial({color:c, roughness:0.78}));
@@ -2693,19 +2726,74 @@ const HAIR = [0x16110d, 0x3b2a1a, 0x6b4a2a, 0xb88a4a, 0x0b0b0b, 0x2a1d14]
   .map(c => new THREE.MeshStandardMaterial({color:c, roughness:0.9}));
 const SOCKS = [new THREE.MeshStandardMaterial({color:0xf4f4f4, roughness:0.72}),
                new THREE.MeshStandardMaterial({color:0x0e2a6e, roughness:0.72})];
-// Shirt numbers, drawn once each on a small canvas. A number, never a name.
+// Shirt numbers. A number, never a name.
 const SHIRT = [1, 3, 4, 5, 2, 6, 8, 10, 11, 9, 7];
-const NUMBER_MAT = {};
-function numberMat(n){
-  if (NUMBER_MAT[n]) return NUMBER_MAT[n];
-  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
-  const x = cv.getContext('2d');
-  x.font = 'bold 46px Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.lineWidth = 5; x.strokeStyle = 'rgba(0,0,0,0.55)'; x.strokeText(String(n), 32, 35);
-  x.fillStyle = '#ffffff'; x.fillText(String(n), 32, 35);
-  const t = new THREE.CanvasTexture(cv);
-  return NUMBER_MAT[n] = new THREE.MeshBasicMaterial({map:t, transparent:true, depthWrite:false});
+/* ==============================================================
+   THE SHIRT IS ONE TEXTURE wrapped round the torso: the colour,
+   a side panel down each side, the advert across the front and
+   the number on the back - painted, so a whole shirt is still
+   ONE thing to draw. The number used to be a separate plate on
+   every back; painting it in took 22 parts OFF the frame.
+
+   Round a cylinder the texture's left edge is the front of the
+   chest, a quarter across is the left side, half way is the
+   back, three quarters the right side. So the advert is drawn
+   twice, half at each edge, and meets in the middle of the chest.
+
+   THE ADVERT SAYS AI2ORBIT. A real brand's logo cannot go on it
+   without that brand agreeing; the space is there for whoever
+   does.
+   ============================================================== */
+const ADVERT = 'AI2ORBIT';
+const SHIRTS = [];                  // every painted shirt, so a kit change repaints them all
+function lum(hex){ const v = parseInt(hex.slice(1), 16); return (0.3*(v >> 16) + 0.59*((v >> 8) & 255) + 0.11*(v & 255)) / 255; }
+function paintShirt(sh){
+  const k = KITS[kitN][sh.team ? 'b' : 'a'];
+  const base = sh.gk ? sh.gkColour : k[0], panel = k[2];
+  const x = sh.cv.getContext('2d'), W = sh.cv.width, H = sh.cv.height;
+  x.fillStyle = base; x.fillRect(0, 0, W, H);
+  x.fillStyle = panel;                                       // side panels
+  for (const u of [0.25, 0.75]) x.fillRect(W*u - W*0.035, 0, W*0.07, H);
+  const ink = lum(base) > 0.55 ? '#141414' : '#ffffff';
+  x.fillStyle = ink; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = 'bold ' + Math.round(H*0.16) + 'px Arial, sans-serif';  // the advert, across the chest
+  x.fillText(ADVERT, 0, H*0.40); x.fillText(ADVERT, W, H*0.40);
+  x.font = 'bold ' + Math.round(H*0.42) + 'px Arial, sans-serif';  // the number, on the back
+  x.lineWidth = 4; x.strokeStyle = ink === '#ffffff' ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.45)';
+  x.strokeText(String(sh.number), W*0.5, H*0.47); x.fillText(String(sh.number), W*0.5, H*0.47);
+  sh.tex.needsUpdate = true;
 }
+function shirtMaterial(team, gk, number, gkColour){
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4;
+  // PAINTED COLOURS ARE sRGB. Left unmarked, the red was brightened a second time on the way to
+  // the screen and came out pink.
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sh = { cv, tex, team, gk, number, gkColour };
+  paintShirt(sh); SHIRTS.push(sh);
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55 });
+  m.userData.number = number; m.userData.advert = ADVERT;
+  return m;
+}
+/* THE FACE is painted on the head too - eyes and brows on each skin tone, all the same face,
+   so it costs nothing to draw. Round a sphere the front of the face is a quarter across. */
+function faceMaterial(hex){
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 64;
+  const x = cv.getContext('2d'), W = cv.width, H = cv.height;
+  x.fillStyle = '#' + hex.toString(16).padStart(6, '0'); x.fillRect(0, 0, W, H);
+  x.fillStyle = '#1a1210';
+  for (const u of [0.215, 0.285]){
+    x.beginPath(); x.ellipse(W*u, H*0.53, W*0.012, H*0.035, 0, 0, 7); x.fill();      // eyes
+    x.fillRect(W*u - W*0.02, H*0.47, W*0.04, H*0.018);                                 // brows
+  }
+  x.fillStyle = 'rgba(90,30,30,0.55)'; x.fillRect(W*0.235, H*0.64, W*0.03, H*0.012);   // mouth
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.78 });
+}
+const SKIN_HEX = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0x6b3e1f];
+const FACES = SKIN_HEX.map(faceMaterial);
+/* HAIR STYLES: short, long at the back, shaved, and tall on top. */
+const HAIR_STYLES = ['SHORT', 'LONG', 'SHAVED', 'TALL'];
 function limbGeo(len, rTop, rBot){
   const g = new THREE.CylinderGeometry(rTop, rBot, len, 7);
   g.translate(0, -len/2, 0);            // the JOINT sits at the origin, the bone hangs below
@@ -2733,13 +2821,17 @@ function buildRig(kit, shorts, look){
 
   const hips = new THREE.Mesh(GEO.hips, shorts); hips.position.y = 0.92; root.add(hips);
   const chest = new THREE.Group(); chest.position.y = 0.11; hips.add(chest);
-  const torso = new THREE.Mesh(GEO.torso, kit); torso.position.y = 0.28; chest.add(torso);
+  const torso = new THREE.Mesh(GEO.torso, look.shirt || kit); torso.position.y = 0.28; chest.add(torso);
   const neck = new THREE.Mesh(GEO.neck, skin); neck.position.y = 0.60; chest.add(neck);
-  const head = new THREE.Mesh(GEO.head, skin); head.position.y = 0.74; chest.add(head);
-  const hair = new THREE.Mesh(GEO.hair, hairM); hair.position.y = 0.012; hair.rotation.x = -0.18; head.add(hair);
-  if (look.number) {
-    const num = new THREE.Mesh(GEO.number, numberMat(look.number));
-    num.position.set(0, 0.32, -0.152); num.rotation.y = Math.PI; chest.add(num);
+  const head = new THREE.Mesh(GEO.head, FACES[look.skin || 0]); head.position.y = 0.74; chest.add(head);
+  const style = look.style || 0;
+  if (style !== 2) {                                   // shaved: no hair at all
+    const hair = new THREE.Mesh(GEO.hair, hairM); hair.position.y = 0.012; hair.rotation.x = -0.18;
+    if (style === 3) hair.scale.set(1, 1.35, 1);       // tall on top
+    head.add(hair);
+  }
+  if (style === 1) {                                   // long at the back
+    const back = new THREE.Mesh(GEO.hairBack, hairM); back.position.set(0, -0.04, -0.105); head.add(back);
   }
 
   const arms = [], legs = [];
@@ -2761,7 +2853,7 @@ function buildRig(kit, shorts, look){
     const bo = new THREE.Mesh(GEO.boot, MATS.boot); bo.position.set(0,-0.035,0.05); an.add(bo);
     legs.push({hip, kn, an, side});
   }
-  return {root, hips, chest, arms, legs, phase: rnd()*6.283};
+  return {root, hips, chest, arms, legs, phase: rnd()*6.283, style: look.style || 0};
 }
 
 // THE GAIT lives in gait.js, because this page, runner.html and demo.html all needed it and
@@ -2876,8 +2968,12 @@ class Player {
     // Each player looks like himself: skin and hair drawn once from the seeded generator, so
     // the same player looks the same on every load. Team socks, and the shirt number.
     this.rig = buildRig(kit, team ? MATS.shB : MATS.shA,
-                        { skin: Math.floor(rndLook()*SKIN.length), hair: Math.floor(rndLook()*HAIR.length),
-                          sock: team, number: SHIRT[idx] });
+                        (() => { const sk = Math.floor(rndLook()*SKIN.length), hr = Math.floor(rndLook()*HAIR.length),
+                                       sty = Math.floor(rndLook()*HAIR_STYLES.length);
+                                 return { skin: sk, hair: hr, style: sty, sock: team, number: SHIRT[idx],
+                                          shirt: shirtMaterial(team, this.gk, SHIRT[idx],
+                                                               this.gk ? (team ? '#14b8a6' : '#f59e0b') : null) }; })());
+    this.look = { style: HAIR_STYLES[this.rig.style || 0] };
     this.role = ROLE[idx];
     this.top = ROLE_TOP[this.role];
     scene.add(this.rig.root);
@@ -3796,6 +3892,20 @@ function think(p, dt){
                    : {x:d.x/len, z:d.y/len, m:clamp(len/8, 0.28, 0.95)};
 }
 
+// ---------------------------------------------------------------------------- the ball in the air and on the ground
+// The surface decides how much bounce the ball keeps and how fast a rolling ball slows. On natural
+// grass these are the 0,42 and 1,05 the match was always played with.
+function ballFlight(b, dt){
+  const S = SURF[surfN];
+  b.vel.y -= 16.5*dt;
+  b.pos.addScaledVector(b.vel, dt);
+  if (b.pos.y <= 0.11) {
+    b.pos.y = 0.11;
+    if (b.vel.y < 0) b.vel.y = -b.vel.y*S.bounce;
+    if (Math.abs(b.vel.y) < 0.6) b.vel.y = 0;
+    b.vel.x *= 1 - S.roll*dt; b.vel.z *= 1 - S.roll*dt;
+  }
+}
 // ---------------------------------------------------------------------------- step
 let shootHeld = 0;
 function step(dt){
@@ -3882,14 +3992,7 @@ function step(dt){
                  o.pos.y + fz*0.55);
     ball.vel.set(o.vel.x, 0, o.vel.y);
   } else {
-    ball.vel.y -= 16.5*dt;
-    ball.pos.addScaledVector(ball.vel, dt);
-    if (ball.pos.y <= 0.11) {
-      ball.pos.y = 0.11;
-      if (ball.vel.y < 0) ball.vel.y = -ball.vel.y*0.42;
-      if (Math.abs(ball.vel.y) < 0.6) ball.vel.y = 0;
-      ball.vel.x *= 1 - 1.05*dt; ball.vel.z *= 1 - 1.05*dt;
-    }
+    ballFlight(ball, dt);
     if (ball.free <= 0) {                          // who wins it
       let best = null, bd = 1e9;
       for (const p of all) {
@@ -4224,6 +4327,23 @@ function startMatch(){
   toast('KICK OFF');
 }
 document.getElementById('go').onclick = startMatch;
+function applySurface(n){
+  surfN = n; grassA.color.setHex(SURF[n].a); grassB.color.setHex(SURF[n].b);
+  [].forEach.call(document.querySelectorAll('#optSurf a'), (a, i) => a.classList.toggle('on', i === n));
+  el('tSurf').textContent = SURF[n].name;
+}
+function applyKit(n){
+  kitN = n; const k = KITS[n];
+  MATS.kitA.color.set(k.a[0]); MATS.shA.color.set(k.a[1]); MATS.kitB.color.set(k.b[0]); MATS.shB.color.set(k.b[1]);
+  SHIRTS.forEach(paintShirt);
+  // the scoreboard badges wear the kit too
+  [['nameA', k.a[0]], ['nameB', k.b[0]]].forEach(([id, c]) => { const e = el(id); if (!e) return;
+    e.style.background = c; e.style.color = lum(c) > 0.55 ? '#111' : '#fff'; });
+  [].forEach.call(document.querySelectorAll('#optKit a'), (a, i) => a.classList.toggle('on', i === n));
+}
+SURF.forEach((sf, i) => { const a = document.createElement('a'); a.textContent = sf.name; a.onclick = () => applySurface(i); el('optSurf').appendChild(a); });
+KITS.forEach((kt, i) => { const a = document.createElement('a'); a.textContent = kt.name; a.onclick = () => applyKit(i); el('optKit').appendChild(a); });
+applySurface(surfN); applyKit(kitN);
 {
   const names = { GK:'GOALKEEPER', CB:'CENTRE BACK', FB:'FULL BACK', CM:'MIDFIELD', W:'WINGER', ST:'STRIKER' };
   const box = document.getElementById('pace');
@@ -4252,7 +4372,26 @@ window.__game = {
   kicks: () => JSON.parse(JSON.stringify(KICKS)),
   crowd: () => ({ n: crowd.n, stands: crowd.stands.length, cheering: G.t < crowd.cheerUntil, team: crowd.cheerTeam, shown: crowd.shown }),
   cheer: (team) => crowdCheer(team),
-  numbers: () => { let n = 0; scene.traverse(o => { if (o.isMesh && o.geometry === GEO.number) n++; }); return n; },
+  numbers: () => { let n = 0; scene.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.number) n++; }); return n; },
+  adverts: () => { let n = 0; scene.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.advert === 'AI2ORBIT') n++; }); return n; },
+  faces: () => { let n = 0; scene.traverse(o => { if (o.isMesh && FACES.indexOf(o.material) >= 0) n++; }); return n; },
+  hairStyles: () => all.map(p => p.look.style),
+  surface: (n) => { if (n !== undefined) applySurface(n); return { n: surfN, name: SURF[surfN].name, roll: SURF[surfN].roll, bounce: SURF[surfN].bounce }; },
+  kit: (n) => { if (n !== undefined) applyKit(n); return { n: kitN, name: KITS[kitN].name, sleeveA: '#' + MATS.kitA.color.getHexString() }; },
+  // A ball struck along the ground at 10 m/s, and one dropped from 2 m, through ballFlight itself.
+  surfaceTest: (n) => {
+    const keep = surfN; surfN = n;
+    const b = { pos: new THREE.Vector3(0, 0.11, 0), vel: new THREE.Vector3(10, 0, 0) };
+    let t = 0; while (Math.hypot(b.vel.x, b.vel.z) > 0.05 && t < 120) { ballFlight(b, 1/240); t += 1/240; }
+    const roll = b.pos.x;
+    const d = { pos: new THREE.Vector3(0, 2, 0), vel: new THREE.Vector3(0, 0, 0) };
+    let landed = false, top = 0, u = 0;
+    while (u < 10) { const was = d.vel.y; ballFlight(d, 1/240); u += 1/240;
+      if (!landed && d.pos.y <= 0.11 + 1e-9 && d.vel.y > 0) landed = true;
+      if (landed) { top = Math.max(top, d.pos.y); if (was > 0 && d.vel.y <= 0) break; } }
+    surfN = keep;
+    return { roll, bounceTop: top - 0.11 };
+  },
   offLineDegrees: (n) => {               // how far off line the missed back kicks really went
     const lb = teams[0][1], out = [];
     while (out.length < n) {

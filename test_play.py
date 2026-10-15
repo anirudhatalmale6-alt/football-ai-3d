@@ -797,6 +797,20 @@ def run_pace_and_look(url):
         c = page.evaluate("() => window.__game.crowd()")
         chk(c["stands"] == 4 and c["n"] > 4000, "four stands with a crowd of %d" % c["n"])
         chk(page.evaluate("() => window.__game.numbers()") == 22, "all 22 players have a number on the back")
+        chk(page.evaluate("() => window.__game.adverts()") == 22, "every shirt carries the AI2ORBIT advert")
+        chk(page.evaluate("() => window.__game.faces()") == 22, "every player has a face")
+        hs = page.evaluate("() => window.__game.hairStyles()")
+        chk(len(set(hs)) >= 3, "the side has %d different hair styles (%s)" % (len(set(hs)), sorted(set(hs))))
+        s = [page.evaluate("(n) => window.__game.surfaceTest(n)", n) for n in range(3)]
+        chk(s[0]["roll"] < s[1]["roll"] < s[2]["roll"],
+            "a 10 m/s ground ball rolls %.1f, %.1f, %.1f m on natural, hybrid, artificial" % tuple(x["roll"] for x in s))
+        chk(s[0]["bounceTop"] < s[1]["bounceTop"] < s[2]["bounceTop"],
+            "a 2 m drop bounces %.2f, %.2f, %.2f m on natural, hybrid, artificial" % tuple(x["bounceTop"] for x in s))
+        nat = page.evaluate("() => window.__game.surface(0)")
+        chk(nat["roll"] == 1.05 and nat["bounce"] == 0.42, "natural grass keeps the values the match was tested on")
+        k = page.evaluate("() => window.__game.kit(2)")
+        chk(k["sleeveA"] == "#f2c318", "a kit change recolours the sleeves (%s)" % k["sleeveA"])
+        page.evaluate("() => window.__game.kit(0)")
         page.click("#go")
         time.sleep(0.4)
         chk(page.evaluate("() => document.getElementById('tBack').textContent") == "--",
