@@ -82,6 +82,13 @@
   <svg id="map" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid meet"></svg>
 
   <div class="cards" id="cards"></div>
+  <div id="rebuild" style="display:none;margin-top:10px;border:1px solid #c8942a;padding:8px 10px;background:#17130a">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <b id="rbStage" style="color:#c8942a">REBUILDING</b><b id="rbClock" style="font-size:17px">0:00</b></div>
+    <div style="height:6px;background:#1e2b36;margin-top:6px"><div id="rbFill" style="height:6px;width:0;background:#c8942a"></div></div>
+    <div id="rbNote" style="color:#7c93a6;font-size:11px;margin-top:5px"></div>
+    <table id="rbT" style="margin-top:6px"><thead><tr><th>wave</th><th>routers</th><th class="n">detect</th><th class="n">tell</th><th class="n">recalculate</th><th class="n">install</th><th class="n">done at</th></tr></thead><tbody></tbody></table>
+  </div>
   <table id="hops"><thead><tr><th>#</th><th>exchange</th>
     <th class="n">leg km</th><th class="n">running km</th>
     <th class="n">leg ms</th></tr></thead><tbody></tbody></table>
@@ -288,9 +295,10 @@ function draw(p){
   });
   if(p) for(var i=0;i<p.length-1;i++){
     var a=xy(CITY[p[i]]), b=xy(CITY[p[i+1]]);
+    var pending = rb && rb.p===p && !rb.done && i >= rb.built;      /* not installed yet */
     s+='<line x1="'+a[0].toFixed(1)+'" y1="'+a[1].toFixed(1)+
        '" x2="'+b[0].toFixed(1)+'" y2="'+b[1].toFixed(1)+
-       '" stroke="'+(avoided.length?"#c8942a":"#2f9e5e")+'" stroke-width="3"/>';
+       '" stroke="'+(pending?"#5a6b78":(avoided.length?"#c8942a":"#2f9e5e"))+'" stroke-width="3"'+(pending?' stroke-dasharray="5 4"':'')+'/>';
   }
   CITY.forEach(function(c,i){
     var q=xy(c), on=p&&p.indexOf(i)>=0;
@@ -339,18 +347,58 @@ function show(p){
   draw(p);
 }
 
-function go(){ avoided=[]; show(path(+elFrom.value,+elTo.value,null)); }
+function go(){ avoided=[]; rb=null; document.getElementById("rebuild").style.display="none"; show(path(+elFrom.value,+elTo.value,null)); }
 
 /* REROUTE.  Takes the first link of the current path out of the
    network and finds the best way round it - which is what a
    carrier does when a cable is cut.  The figures then show what
    that costs. */
+/* A REROUTE IS NOT INSTANT. When a link is cut, the routers along the new way have to find out,
+   tell their neighbours, work the route out again and install it - in waves, a few routers at a
+   time. The stage times are the ones given: 8, 11, 12 and 14 seconds, 45 s a wave, four routers a
+   wave, so a 15-hop reroute takes 3 minutes to build. Shown ten times faster than real time, and
+   said so on the page. Until it is built, the data has no way through. */
+var STAGES=[["Detect",8],["Tell neighbours",11],["Recalculate",12],["Install",14]];
+var ROUTERS_PER_WAVE=4, SHOW_FASTER=10, rb=null;
+function waveSecs(){ return STAGES.reduce(function(a,s){ return a+s[1]; },0); }
+function rebuildPlan(p){
+  var hops=p.length-1, waves=Math.ceil(hops/ROUTERS_PER_WAVE), plan=[], t=0;
+  for(var w=0;w<waves;w++){ var from=w*ROUTERS_PER_WAVE+1, to=Math.min(hops,(w+1)*ROUTERS_PER_WAVE); t+=waveSecs();
+    plan.push({wave:w+1, from:from, to:to, done:t}); }
+  return {waves:waves, total:t, plan:plan};
+}
+function mmss(s){ s=Math.round(s); return Math.floor(s/60)+":"+(s%60<10?"0":"")+(s%60); }
+function startRebuild(p){
+  rb={p:p, plan:rebuildPlan(p), t0:performance.now(), built:0};
+  var box=document.getElementById("rebuild"); box.style.display="";
+  var tb=document.querySelector("#rbT tbody"); tb.innerHTML="";
+  rb.plan.plan.forEach(function(w){ var tr=document.createElement("tr");
+    tr.innerHTML='<td>'+w.wave+'</td><td>'+CITY[p[w.from]][0]+' to '+CITY[p[w.to]][0]+'</td>'+STAGES.map(function(s){return '<td class="n">'+s[1]+' s</td>';}).join("")+
+      '<td class="n">'+mmss(w.done)+'</td>'; tb.appendChild(tr); });
+  document.getElementById("rbNote").textContent=(p.length-1)+' hops, '+rb.plan.waves+' waves of '+ROUTERS_PER_WAVE+' routers, '+waveSecs()+
+    ' s a wave: '+mmss(rb.plan.total)+' to build. Shown '+SHOW_FASTER+' times faster than real time.';
+  tickRebuild();
+}
+function tickRebuild(){
+  if(!rb) return;
+  var real=(performance.now()-rb.t0)/1000*SHOW_FASTER, total=rb.plan.total;
+  var t=Math.min(real,total), wave=Math.min(rb.plan.waves-1, Math.floor(t/waveSecs()));
+  var inWave=t-wave*waveSecs(), stage=0, acc=0;
+  for(var i=0;i<STAGES.length;i++){ if(inWave>=acc+STAGES[i][1]) { acc+=STAGES[i][1]; stage=i+1; } }
+  stage=Math.min(stage,STAGES.length-1);
+  rb.built = t>=total ? rb.p.length-1 : Math.min(rb.p.length-1, (t>=rb.plan.plan[wave].done? rb.plan.plan[wave].to : (wave? rb.plan.plan[wave-1].to : 0)));
+  document.getElementById("rbClock").textContent=mmss(t)+' of '+mmss(total);
+  document.getElementById("rbFill").style.width=(t/total*100).toFixed(1)+'%';
+  document.getElementById("rbStage").textContent = t>=total ? 'BUILT - DATA FLOWING AGAIN' : 'WAVE '+(wave+1)+' OF '+rb.plan.waves+': '+STAGES[stage][0].toUpperCase();
+  draw(rb.p);
+  if(t<total) requestAnimationFrame(tickRebuild); else { rb.done=true; }
+}
 function reroute(){
   if(!current||current.length<2){ go(); return; }
   avoided.push(current[0]+'-'+current[1]);
   var p=path(+elFrom.value,+elTo.value,avoided);
   if(!p){ avoided.pop(); alert("no way round that one"); return; }
-  show(p);
+  show(p); startRebuild(p);
 }
 
 /* REMAP: from the chosen city to the capital of every country, all at once. */
@@ -437,6 +485,10 @@ go(); remap();
 window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
   links:function(){ return links.length; }, sea:function(){ return links.filter(function(l){return l[3]==='sea';}).map(function(l){return CITY[l[0]][0]+'-'+CITY[l[1]][0];}); },
   check:selfCheck, fails:function(){ return checkFails; },
+  plan:function(hops){ var p=[]; for(var i=0;i<=hops;i++) p.push(i); return rebuildPlan(p); },
+  rebuild:function(){ return rb ? {built:rb.built, hops:rb.p.length-1, total:rb.plan.total, done:!!rb.done,
+    stage:document.getElementById("rbStage").textContent} : null; },
+  reroute:function(){ reroute(); },
   route:function(a,b){ var p=path(idx(a),idx(b),null); return p?{hops:p.length-1,km:routeKm(p),via:p.map(function(i){return CITY[i][0];})}:null; } };
 </script>
 <script src="tech.js"></script>
