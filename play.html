@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>AI2ORBIT Football AI - Playable</title>
+<title>FootballAI - Playable</title>
 <style>
 /* NOT ONE FONT IS FETCHED FROM ANYWHERE.
    These pages used to @import three families from Google, which meant
@@ -161,7 +161,7 @@
 <body>
 
 <div class="of" id="start">
-  <h1>AI2<span>ORBIT</span></h1>
+  <h1>Football<span>AI</span></h1>
   <h2>FOOTBALL AI &mdash; PLAYABLE</h2>
   <p>Ten outfield players a side plus keepers, all articulated, all driven by the engine.
      You control the highlighted player; the switch is automatic when possession changes.
@@ -553,11 +553,10 @@ const SHIRT = [1, 3, 4, 5, 2, 6, 8, 10, 11, 9, 7];
    back, three quarters the right side. So the advert is drawn
    twice, half at each edge, and meets in the middle of the chest.
 
-   THE ADVERT SAYS AI2ORBIT. A real brand's logo cannot go on it
-   without that brand agreeing; the space is there for whoever
-   does.
+   THE ADVERT SAYS FootballAI - the one brand in this game, as
+   the client set it. No other brand appears anywhere in it.
    ============================================================== */
-const ADVERT = 'AI2ORBIT';
+const ADVERT = 'FootballAI';
 const SHIRTS = [];                  // every painted shirt, so a kit change repaints them all
 function lum(hex){ const v = parseInt(hex.slice(1), 16); return (0.3*(v >> 16) + 0.59*((v >> 8) & 255) + 0.11*(v & 255)) / 255; }
 function paintShirt(sh){
@@ -569,7 +568,11 @@ function paintShirt(sh){
   for (const u of [0.25, 0.75]) x.fillRect(W*u - W*0.035, 0, W*0.07, H);
   const ink = lum(base) > 0.55 ? '#141414' : '#ffffff';
   x.fillStyle = ink; x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.font = 'bold ' + Math.round(H*0.16) + 'px Arial, sans-serif';  // the advert, across the chest
+  // the advert, across the chest, sized to stay clear of the side panels (front spans 0.36 of the width)
+  let fs = Math.round(H*0.16);
+  x.font = 'bold ' + fs + 'px Arial, sans-serif';
+  while (x.measureText(ADVERT).width > W*0.36 && fs > 8){ fs--; x.font = 'bold ' + fs + 'px Arial, sans-serif'; }
+  sh.advertWidth = x.measureText(ADVERT).width / W;
   x.fillText(ADVERT, 0, H*0.40); x.fillText(ADVERT, W, H*0.40);
   x.font = 'bold ' + Math.round(H*0.42) + 'px Arial, sans-serif';  // the number, on the back
   x.lineWidth = 4; x.strokeStyle = ink === '#ffffff' ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.45)';
@@ -2186,7 +2189,8 @@ window.__game = {
   crowd: () => ({ n: crowd.n, stands: crowd.stands.length, cheering: G.t < crowd.cheerUntil, team: crowd.cheerTeam, shown: crowd.shown }),
   cheer: (team) => crowdCheer(team),
   numbers: () => { let n = 0; scene.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.number) n++; }); return n; },
-  adverts: () => { let n = 0; scene.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.advert === 'AI2ORBIT') n++; }); return n; },
+  advertFits: () => SHIRTS.every(sh => sh.advertWidth > 0 && sh.advertWidth <= 0.36 + 1e-9),
+  adverts: () => { let n = 0; scene.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.advert === 'FootballAI') n++; }); return n; },
   faces: () => { let n = 0; scene.traverse(o => { if (o.isMesh && FACES.indexOf(o.material) >= 0) n++; }); return n; },
   hairStyles: () => all.map(p => p.look.style),
   surface: (n) => { if (n !== undefined) applySurface(n); return { n: surfN, name: SURF[surfN].name, roll: SURF[surfN].roll, bounce: SURF[surfN].bounce }; },
