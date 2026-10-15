@@ -76,6 +76,7 @@
     <div><label>&nbsp;</label><button class="go" id="route">ROUTE</button></div>
     <div><label>&nbsp;</label><button class="alt" id="reroute">REROUTE</button></div>
     <div><label>&nbsp;</label><button id="csv">EXPORT CSV</button></div>
+    <div><label>&nbsp;</label><button class="alt" id="remap">REMAP</button></div>
   </div>
 
   <svg id="map" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid meet"></svg>
@@ -85,6 +86,9 @@
     <th class="n">leg km</th><th class="n">running km</th>
     <th class="n">leg ms</th></tr></thead><tbody></tbody></table>
 
+  <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">EVERY COUNTRY FROM <span id="rmFrom"></span></h2>
+  <table id="remapT"><thead><tr><th>country</th><th>capital</th><th class="n">hops</th><th class="n">km</th><th class="n">one way ms</th></tr></thead><tbody></tbody></table>
+  <div id="checks" style="margin-top:10px;font-size:12px"></div>
   <div class="note" id="honest"></div>
 </div>
 <script>
@@ -93,23 +97,64 @@
 /* Real places, real coordinates.  Every distance on this page is
    worked out from these and nothing else. */
 var CITY = [
-  ["London",51.507,-0.128],["Amsterdam",52.374,4.892],["Frankfurt",50.110,8.682],
-  ["Paris",48.857,2.352],["Brussels",50.851,4.352],["Dublin",53.350,-6.260],
-  ["Copenhagen",55.676,12.568],["Stockholm",59.329,18.069],["Oslo",59.914,10.752],
-  ["Helsinki",60.170,24.938],["Tallinn",59.437,24.754],["Riga",56.949,24.105],
-  ["Vilnius",54.687,25.280],["Warsaw",52.230,21.012],["Berlin",52.520,13.405],
-  ["Hamburg",53.551,9.994],["Munich",48.135,11.582],["Vienna",48.208,16.374],
-  ["Prague",50.076,14.438],["Budapest",47.498,19.040],["Bratislava",48.146,17.107],
-  ["Zurich",47.377,8.542],["Milan",45.464,9.190],["Rome",41.903,12.496],
-  ["Madrid",40.417,-3.704],["Barcelona",41.385,2.173],["Lisbon",38.722,-9.139],
-  ["Marseille",43.296,5.370],["Lyon",45.764,4.836],["Geneva",46.204,6.143],
-  ["Luxembourg",49.611,6.132],["Zagreb",45.815,15.982],["Belgrade",44.787,20.449],
-  ["Bucharest",44.427,26.103],["Sofia",42.698,23.322],["Athens",37.984,23.728],
-  ["Istanbul",41.008,28.978],["Kyiv",50.450,30.523],["Minsk",53.902,27.562],
-  ["Gothenburg",57.709,11.974],["Manchester",53.481,-2.242],["Edinburgh",55.953,-3.188],
-  ["Rotterdam",51.924,4.478],["Cologne",50.938,6.960],["Stuttgart",48.775,9.182],
-  ["Krakow",50.065,19.945],["Porto",41.158,-8.629],["Valencia",39.470,-0.377],
-  ["Naples",40.852,14.268],["Palermo",38.116,13.361]
+  /* name, latitude, longitude, country, 1 = the country's capital (or its main European city) */
+  ["London",51.507,-0.128,"United Kingdom",1],["Manchester",53.481,-2.242,"United Kingdom"],["Edinburgh",55.953,-3.188,"United Kingdom"],
+  ["Glasgow",55.864,-4.252,"United Kingdom"],["Belfast",54.597,-5.930,"United Kingdom"],["Cardiff",51.481,-3.179,"United Kingdom"],
+  ["Birmingham",52.486,-1.890,"United Kingdom"],
+  ["Dublin",53.350,-6.260,"Ireland",1],["Cork",51.898,-8.471,"Ireland"],["Galway",53.271,-9.057,"Ireland"],
+  ["Reykjavik",64.146,-21.942,"Iceland",1],
+  ["Paris",48.857,2.352,"France",1],["Marseille",43.296,5.370,"France"],["Lyon",45.764,4.836,"France"],["Bordeaux",44.838,-0.579,"France"],
+  ["Toulouse",43.605,1.444,"France"],["Nice",43.710,7.262,"France"],["Lille",50.629,3.057,"France"],["Nantes",47.218,-1.554,"France"],
+  ["Strasbourg",48.573,7.752,"France"],
+  ["Brussels",50.851,4.352,"Belgium",1],["Antwerp",51.219,4.402,"Belgium"],
+  ["Amsterdam",52.374,4.892,"Netherlands",1],["Rotterdam",51.924,4.478,"Netherlands"],
+  ["Luxembourg",49.611,6.132,"Luxembourg",1],
+  ["Berlin",52.520,13.405,"Germany",1],["Hamburg",53.551,9.994,"Germany"],["Frankfurt",50.110,8.682,"Germany"],["Munich",48.135,11.582,"Germany"],
+  ["Cologne",50.938,6.960,"Germany"],["Stuttgart",48.775,9.182,"Germany"],["Dresden",51.050,13.738,"Germany"],["Leipzig",51.340,12.375,"Germany"],
+  ["Hanover",52.376,9.732,"Germany"],["Nuremberg",49.452,11.077,"Germany"],
+  ["Copenhagen",55.676,12.568,"Denmark",1],["Aarhus",56.163,10.204,"Denmark"],
+  ["Oslo",59.914,10.752,"Norway",1],["Bergen",60.391,5.322,"Norway"],["Stavanger",58.970,5.733,"Norway"],["Trondheim",63.430,10.395,"Norway"],
+  ["Tromso",69.649,18.956,"Norway"],
+  ["Stockholm",59.329,18.069,"Sweden",1],["Gothenburg",57.709,11.974,"Sweden"],["Malmo",55.605,13.003,"Sweden"],["Sundsvall",62.391,17.307,"Sweden"],
+  ["Lulea",65.584,22.155,"Sweden"],
+  ["Helsinki",60.170,24.938,"Finland",1],["Tampere",61.498,23.761,"Finland"],["Turku",60.452,22.267,"Finland"],["Oulu",65.012,25.465,"Finland"],
+  ["Kuopio",62.892,27.677,"Finland"],
+  ["Tallinn",59.437,24.754,"Estonia",1],["Tartu",58.378,26.729,"Estonia"],
+  ["Riga",56.949,24.105,"Latvia",1],
+  ["Vilnius",54.687,25.280,"Lithuania",1],["Kaunas",54.899,23.904,"Lithuania"],
+  ["Warsaw",52.230,21.012,"Poland",1],["Krakow",50.065,19.945,"Poland"],["Gdansk",54.352,18.646,"Poland"],["Poznan",52.406,16.925,"Poland"],
+  ["Wroclaw",51.108,17.039,"Poland"],
+  ["Prague",50.076,14.438,"Czechia",1],["Brno",49.195,16.608,"Czechia"],
+  ["Bratislava",48.146,17.107,"Slovakia",1],["Kosice",48.716,21.261,"Slovakia"],
+  ["Vienna",48.208,16.374,"Austria",1],["Graz",47.071,15.439,"Austria"],["Innsbruck",47.269,11.404,"Austria"],
+  ["Budapest",47.498,19.040,"Hungary",1],["Debrecen",47.531,21.627,"Hungary"],
+  ["Bern",46.948,7.447,"Switzerland",1],["Zurich",47.377,8.542,"Switzerland"],["Geneva",46.204,6.143,"Switzerland"],["Basel",47.560,7.589,"Switzerland"],
+  ["Vaduz",47.141,9.521,"Liechtenstein",1],
+  ["Rome",41.903,12.496,"Italy",1],["Milan",45.464,9.190,"Italy"],["Naples",40.852,14.268,"Italy"],["Palermo",38.116,13.361,"Italy"],
+  ["Turin",45.070,7.687,"Italy"],["Bologna",44.494,11.343,"Italy"],["Florence",43.770,11.256,"Italy"],["Bari",41.117,16.872,"Italy"],
+  ["Venice",45.440,12.316,"Italy"],["Cagliari",39.224,9.122,"Italy"],
+  ["San Marino",43.936,12.447,"San Marino",1],["Monaco",43.738,7.425,"Monaco",1],["Valletta",35.899,14.514,"Malta",1],
+  ["Madrid",40.417,-3.704,"Spain",1],["Barcelona",41.385,2.173,"Spain"],["Valencia",39.470,-0.377,"Spain"],["Seville",37.389,-5.984,"Spain"],
+  ["Bilbao",43.263,-2.935,"Spain"],["Zaragoza",41.649,-0.889,"Spain"],["Malaga",36.721,-4.421,"Spain"],["Palma",39.570,2.650,"Spain"],
+  ["Andorra la Vella",42.507,1.522,"Andorra",1],
+  ["Lisbon",38.722,-9.139,"Portugal",1],["Porto",41.158,-8.629,"Portugal"],["Faro",37.019,-7.930,"Portugal"],
+  ["Ljubljana",46.057,14.506,"Slovenia",1],
+  ["Zagreb",45.815,15.982,"Croatia",1],["Split",43.508,16.440,"Croatia"],
+  ["Sarajevo",43.856,18.413,"Bosnia and Herzegovina",1],
+  ["Belgrade",44.787,20.449,"Serbia",1],["Novi Sad",45.267,19.833,"Serbia"],
+  ["Podgorica",42.441,19.263,"Montenegro",1],["Tirana",41.327,19.819,"Albania",1],["Skopje",41.998,21.425,"North Macedonia",1],
+  ["Pristina",42.663,21.165,"Kosovo",1],
+  ["Sofia",42.698,23.322,"Bulgaria",1],["Varna",43.214,27.915,"Bulgaria"],["Plovdiv",42.136,24.743,"Bulgaria"],
+  ["Bucharest",44.427,26.103,"Romania",1],["Cluj-Napoca",46.771,23.624,"Romania"],["Timisoara",45.748,21.209,"Romania"],["Constanta",44.160,28.635,"Romania"],
+  ["Chisinau",47.011,28.864,"Moldova",1],
+  ["Athens",37.984,23.728,"Greece",1],["Thessaloniki",40.640,22.944,"Greece"],["Patras",38.246,21.735,"Greece"],
+  ["Nicosia",35.185,33.382,"Cyprus",1],["Istanbul",41.008,28.978,"Turkey",1],
+  ["Kyiv",50.450,30.523,"Ukraine",1],["Lviv",49.839,24.030,"Ukraine"],["Odesa",46.482,30.723,"Ukraine"],["Kharkiv",49.994,36.230,"Ukraine"],
+  ["Dnipro",48.465,35.046,"Ukraine"],
+  ["Minsk",53.902,27.562,"Belarus",1],["Brest",52.097,23.734,"Belarus"],["Gomel",52.441,30.988,"Belarus"],
+  ["Moscow",55.756,37.617,"Russia",1],["Saint Petersburg",59.939,30.316,"Russia"],["Kaliningrad",54.711,20.452,"Russia"],
+  ["Murmansk",68.970,33.075,"Russia"],["Arkhangelsk",64.540,40.517,"Russia"],["Nizhny Novgorod",56.327,44.006,"Russia"],
+  ["Kazan",55.796,49.106,"Russia"],["Voronezh",51.672,39.184,"Russia"],["Rostov-on-Don",47.236,39.701,"Russia"],["Smolensk",54.782,32.045,"Russia"]
 ];
 
 /* Great circle, in kilometres.  Worked out, not typed. */
@@ -150,7 +195,32 @@ var links = [], adj = [];
         links.push([a,b,d[j][0]]); }
     }
   }
+  /* AN ISLAND OR A FAR NORTHERN CITY may have nobody within reach - Reykjavik's nearest city is
+     well over a thousand kilometres away. Such a place is joined to its nearest city by a
+     MODELLED SEA CABLE, drawn dashed. Then every separate piece of the network is joined to the
+     next by its shortest gap, until one network covers every country. */
+  for(i=0;i<CITY.length;i++) if(!adj[i].length){
+    var nb=-1,nd=Infinity; for(j=0;j<CITY.length;j++) if(j!==i){ var dd=km(CITY[i],CITY[j]); if(dd<nd){nd=dd;nb=j;} }
+    adj[i].push(nb); adj[nb].push(i); links.push([i,nb,nd,'sea']);
+  }
+  for(;;){
+    var comp=pieces(); if(Math.max.apply(null,comp)===0) break;
+    var best=null;
+    for(i=0;i<CITY.length;i++) if(comp[i]===0) for(j=0;j<CITY.length;j++) if(comp[j]!==0){
+      var dj=km(CITY[i],CITY[j]); if(!best||dj<best[2]) best=[i,j,dj]; }
+    adj[best[0]].push(best[1]); adj[best[1]].push(best[0]); links.push([best[0],best[1],best[2],'sea']);
+  }
 })();
+/* which piece of the network each city is in: 0 for the piece holding the first city */
+function pieces(){
+  var comp=CITY.map(function(){return -1;}), k=0, i;
+  for(i=0;i<CITY.length;i++) if(comp[i]<0){
+    var st=[i]; comp[i]=k;
+    while(st.length){ var u=st.pop(); adj[u].forEach(function(v){ if(comp[v]<0){ comp[v]=k; st.push(v); } }); }
+    k++;
+  }
+  return comp;
+}
 
 /* The map.  A plain equirectangular projection with longitude
    squeezed by the cosine of the middle latitude, which keeps
@@ -203,7 +273,8 @@ CITY.forEach(function(c,i){
   var o1=document.createElement("option");o1.value=i;o1.textContent=c[0];elFrom.appendChild(o1);
   var o2=document.createElement("option");o2.value=i;o2.textContent=c[0];elTo.appendChild(o2);
 });
-elFrom.value=0; elTo.value=9;            /* London to Helsinki */
+function idx(n){ for(var i=0;i<CITY.length;i++) if(CITY[i][0]===n) return i; return 0; }
+elFrom.value=idx("Dublin"); elTo.value=idx("Moscow");     /* Ireland to Russia */
 
 var current=null, avoided=[];
 
@@ -213,7 +284,7 @@ function draw(p){
     var a=xy(CITY[l[0]]), b=xy(CITY[l[1]]);
     s+='<line x1="'+a[0].toFixed(1)+'" y1="'+a[1].toFixed(1)+
        '" x2="'+b[0].toFixed(1)+'" y2="'+b[1].toFixed(1)+
-       '" stroke="#24333f" stroke-width="1"/>';
+       '" stroke="#24333f" stroke-width="1"'+(l[3]==='sea'?' stroke-dasharray="4 4"':'')+'/>';
   });
   if(p) for(var i=0;i<p.length-1;i++){
     var a=xy(CITY[p[i]]), b=xy(CITY[p[i+1]]);
@@ -282,6 +353,50 @@ function reroute(){
   show(p);
 }
 
+/* REMAP: from the chosen city to the capital of every country, all at once. */
+function routeKm(p){ var r=0; for(var i=1;i<p.length;i++) r+=km(CITY[p[i-1]],CITY[p[i]]); return r; }
+function remap(){
+  var s0=+elFrom.value, tb=document.querySelector("#remapT tbody"); tb.innerHTML="";
+  document.getElementById("rmFrom").textContent=CITY[s0][0].toUpperCase();
+  var rows=CITY.map(function(c,i){return [c,i];}).filter(function(x){return x[0][4]===1;});
+  rows.sort(function(a,b){return a[0][3]<b[0][3]?-1:1;});
+  rows.forEach(function(x){
+    var p=path(s0,x[1],avoided.length?avoided:null), tr=document.createElement("tr");
+    var d=p?routeKm(p):null;
+    tr.innerHTML='<td>'+x[0][3]+'</td><td>'+x[0][0]+'</td><td class="n">'+(p?p.length-1:'&mdash;')+'</td>'+
+      '<td class="n">'+(p?d.toFixed(0):'&mdash;')+'</td><td class="n">'+(p?ms(d*CABLE_FACTOR).toFixed(2):'&mdash;')+'</td>';
+    tb.appendChild(tr);
+  });
+  selfCheck();
+}
+/* THE PAGE CHECKS ITSELF: one network covering every country, each route the shortest (worked
+   again a second way), and the distances the same both ways. */
+function bellman(s,t){
+  var d=CITY.map(function(){return Infinity;}), k; d[s]=0;
+  for(k=0;k<CITY.length;k++) links.forEach(function(l){ var w=km(CITY[l[0]],CITY[l[1]]);
+    if(d[l[0]]+w<d[l[1]]) d[l[1]]=d[l[0]]+w; if(d[l[1]]+w<d[l[0]]) d[l[0]]=d[l[1]]+w; });
+  return d[t];
+}
+var checkFails=[];
+function selfCheck(){
+  var f=[], comp=pieces();
+  if(Math.max.apply(null,comp)!==0) f.push('the network is in more than one piece');
+  var countries={}; CITY.forEach(function(c){ countries[c[3]]=countries[c[3]]||0; if(c[4]===1) countries[c[3]]++; });
+  Object.keys(countries).forEach(function(k){ if(countries[k]!==1) f.push(k+' has '+countries[k]+' capitals marked'); });
+  var seed=7; function rnd(){ seed=(seed*1103515245+12345)%2147483648; return seed/2147483648; }
+  for(var n=0;n<30;n++){ var a=Math.floor(rnd()*CITY.length), b=Math.floor(rnd()*CITY.length); if(a===b) continue;
+    var p=path(a,b,null), d=routeKm(p), d2=bellman(a,b);
+    if(Math.abs(d-d2)>1e-6) f.push('the route '+CITY[a][0]+' to '+CITY[b][0]+' is not the shortest');
+    if(Math.abs(km(CITY[a],CITY[b])-km(CITY[b],CITY[a]))>1e-9) f.push('a distance differs by direction'); }
+  checkFails=f;
+  var el=document.getElementById("checks");
+  el.innerHTML = f.length ? '<b style="color:#c8462a">THIS PAGE IS NOT CLEAN</b><br>'+f.join('<br>')
+    : '<span style="color:#2f9e5e">'+CITY.length+' cities, '+Object.keys(countries).length+' countries, '+links.length+
+      ' links in one network - every route checked the shortest, a second way</span>';
+  return f;
+}
+document.getElementById("remap").onclick=remap;
+elFrom.addEventListener("change", function(){ go(); remap(); });
 document.getElementById("route").onclick=go;
 document.getElementById("reroute").onclick=reroute;
 document.getElementById("csv").onclick=function(){
@@ -318,7 +433,11 @@ document.getElementById("honest").innerHTML =
   'of anybody\'s real network</b>, no path here is claimed to exist, '+
   'and no time on this page was measured on a wire.';
 
-go();
+go(); remap();
+window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
+  links:function(){ return links.length; }, sea:function(){ return links.filter(function(l){return l[3]==='sea';}).map(function(l){return CITY[l[0]][0]+'-'+CITY[l[1]][0];}); },
+  check:selfCheck, fails:function(){ return checkFails; },
+  route:function(a,b){ var p=path(idx(a),idx(b),null); return p?{hops:p.length-1,km:routeKm(p),via:p.map(function(i){return CITY[i][0];})}:null; } };
 </script>
 <script src="tech.js"></script>
 </body></html>
