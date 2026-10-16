@@ -76,6 +76,8 @@
     <div><label>&nbsp;</label><button class="go" id="route">ROUTE</button></div>
     <div><label>&nbsp;</label><button class="alt" id="reroute">REROUTE</button></div>
     <div><label>&nbsp;</label><button id="csv">EXPORT CSV</button></div>
+    <div><label>&nbsp;</label><button class="alt" id="loadBtn">LOAD NETWORK DATA</button><input type="file" id="loadFile" accept=".csv,text/csv,text/plain" style="display:none"></div>
+    <div><label>&nbsp;</label><button id="tplBtn">DATA TEMPLATE</button></div>
     <div><label>&nbsp;</label><button class="alt" id="remap">REMAP</button></div>
   </div>
 
@@ -91,12 +93,13 @@
   </div>
   <table id="hops"><thead><tr><th>#</th><th>exchange</th>
     <th class="n">leg km</th><th class="n">running km</th>
-    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th></tr></thead><tbody></tbody></table>
+    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th><th>hardware</th><th>cable in, provider</th></tr></thead><tbody></tbody></table>
 
+  <div id="dataNote" style="margin-top:8px;font-size:12px;color:#7c93a6"></div>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">THE BOXES IN A ROUTER, ESTIMATED</h2>
   <table id="boxT"><thead><tr><th>box</th><th>where</th><th class="n">time us</th><th class="n">same as fibre km</th><th>what it does</th></tr></thead><tbody></tbody></table>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">EVERY ROUTER, MODELLED</h2>
-  <table id="rtrT"><thead><tr><th>router</th><th>country</th><th>role</th><th>address</th><th>links</th><th>boxes</th></tr></thead><tbody></tbody></table>
+  <table id="rtrT"><thead><tr><th>router</th><th>country</th><th>role</th><th>address</th><th>links</th><th>boxes</th><th>hardware</th></tr></thead><tbody></tbody></table>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">EVERY COUNTRY FROM <span id="rmFrom"></span></h2>
   <table id="remapT"><thead><tr><th>country</th><th>capital</th><th class="n">hops</th><th class="n">km</th><th class="n">one way ms</th></tr></thead><tbody></tbody></table>
   <div id="checks" style="margin-top:10px;font-size:12px"></div>
@@ -333,7 +336,8 @@ function show(p){
       '<td class="n">'+run.toFixed(0)+'</td>'+
       '<td class="n">'+(i?ms(leg*CABLE_FACTOR).toFixed(2):"&mdash;")+'</td>';
     var bx = boxesAt(i, p.length - 1), us = boxUs(bx);
-    tr.innerHTML += '<td>'+bx.map(function(k){ return BOXES[k][0]; }).join(", ")+'</td><td class="n">'+us.toFixed(1)+'</td><td class="n">'+fibreKm(us).toFixed(1)+'</td>';
+    tr.innerHTML += '<td>'+bx.map(function(k){ return BOXES[k][0]; }).join(", ")+'</td><td class="n">'+us.toFixed(1)+'</td><td class="n">'+fibreKm(us).toFixed(1)+'</td>'
+      + '<td>'+esc(hardwareOf(p[i]))+'</td><td>'+(i ? esc(cableOf(p[i-1], p[i], leg)) : '&mdash;')+'</td>';
     tb.appendChild(tr);
   }
   var cable=run*CABLE_FACTOR;
@@ -438,6 +442,64 @@ function renderBoxes(){
     tr.innerHTML = '<td>'+b[0]+'</td><td>'+b[1]+'</td><td class="n">'+b[2]+'</td><td class="n">'+fibreKm(b[2]).toFixed(1)+'</td><td>'+b[3]+'</td>';
     tb.appendChild(tr); });
 }
+/* NETWORK DATA FROM A FILE. Real carriers do not publish the make, model or address of each router
+   or who owns each cable, so the page cannot know them by itself - and will not make them up.
+   LOAD NETWORK DATA reads them from a CSV the owner of the network fills in (DATA TEMPLATE gives
+   every router and every link, ready to fill), and from then on every routing shows them, marked
+   as from the file. Where nothing is loaded, each row shows the modelled class and says so.
+     router,<city>,<make>,<model>,<ip>
+     link,<city>,<city>,<provider>,<cable type>                                              */
+var NETDATA = { routers: {}, links: {}, file: null, rows: 0, skipped: 0 };
+function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function roleOf(i){ var d = adj[i].length; return d >= 5 ? "Core" : (d >= 3 ? "Distribution" : "Edge"); }
+function hardwareOf(i){
+  var r = NETDATA.routers[CITY[i][0]];
+  if (r && (r.make || r.model)) return [r.make, r.model].filter(Boolean).join(' ') + ' (from file)';
+  var role = roleOf(i);
+  return role === "Core" ? "Core router class, 400G ports (modelled)" : (role === "Distribution" ? "Distribution router class, 100G (modelled)" : "Edge router class, 10-100G (modelled)");
+}
+function linkKey(a, b){ var x = CITY[a][0], y = CITY[b][0]; return x < y ? x + '|' + y : y + '|' + x; }
+function cableOf(a, b, legKm){
+  var l = NETDATA.links[linkKey(a, b)];
+  var sea = links.some(function(k){ return k[3] === 'sea' && ((k[0] === a && k[1] === b) || (k[0] === b && k[1] === a)); });
+  var len = (legKm * CABLE_FACTOR).toFixed(0) + ' km';
+  if (l && (l.provider || l.cable)) return [l.cable || (sea ? 'Sea cable' : 'Fibre'), len, l.provider].filter(Boolean).join(', ') + ' (from file)';
+  return (sea ? 'Sea cable' : 'Single-mode fibre') + ', ' + len + ', provider not published (modelled)';
+}
+function parseCSV(text){
+  var out = []; text.split(/\r?\n/).forEach(function(line){
+    if (!line.trim()) return; var cells = [], cur = '', q = false;
+    for (var i = 0; i < line.length; i++){ var ch = line[i];
+      if (q){ if (ch === '"' && line[i + 1] === '"'){ cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true; else if (ch === ',' || ch === ';'){ cells.push(cur.trim()); cur = ''; } else cur += ch; }
+    cells.push(cur.trim()); out.push(cells); });
+  return out;
+}
+function loadNetData(text, name){
+  var names = {}; CITY.forEach(function(c){ names[c[0].toLowerCase()] = c[0]; });
+  var nd = { routers: {}, links: {}, file: name, rows: 0, skipped: 0 };
+  parseCSV(text).forEach(function(r){
+    var kind = (r[0] || '').toLowerCase();
+    if (kind === 'router' && names[(r[1] || '').toLowerCase()]){
+      if (!(r[2] || r[3] || r[4])) return;
+      nd.routers[names[r[1].toLowerCase()]] = { make: r[2] || '', model: r[3] || '', ip: r[4] || '' }; nd.rows++; }
+    else if (kind === 'link' && names[(r[1] || '').toLowerCase()] && names[(r[2] || '').toLowerCase()]){
+      if (!(r[3] || r[4])) return;
+      var x = names[r[1].toLowerCase()], y = names[r[2].toLowerCase()];
+      nd.links[x < y ? x + '|' + y : y + '|' + x] = { provider: r[3] || '', cable: r[4] || '' }; nd.rows++; }
+    else if (kind === 'router' || kind === 'link') nd.skipped++;
+  });
+  NETDATA = nd;
+  document.getElementById("dataNote").textContent = 'Network data from ' + name + ': ' + nd.rows + ' rows used'
+    + (nd.skipped ? ', ' + nd.skipped + ' rows skipped (place not on the map)' : '') + '. Shown on every routing, marked "from file".';
+  renderRouters(); show(current);
+}
+function templateCSV(){
+  var L = ['kind,place,make or place,model or provider,ip or cable type'];
+  CITY.forEach(function(c){ L.push('router,' + c[0] + ',,,'); });
+  links.forEach(function(l){ L.push('link,' + CITY[l[0]][0] + ',' + CITY[l[1]][0] + ',,'); });
+  return L.join('\n');
+}
 /* EVERY ROUTER. Real carriers do not publish the make, model or address of their routers, so none
    is shown. Each router here has a role from how many links it has, and an address from the range
    set aside for documentation - modelled, and labelled so. */
@@ -446,10 +508,10 @@ function renderRouters(){
   CITY.map(function(c, i){ return i; }).sort(function(a, b){ return CITY[a][3] < CITY[b][3] ? -1 : (CITY[a][3] > CITY[b][3] ? 1 : (CITY[a][0] < CITY[b][0] ? -1 : 1)); })
     .forEach(function(i){
       var deg = adj[i].length, role = deg >= 5 ? "Core" : (deg >= 3 ? "Distribution" : "Edge");
-      var addr = "192.0.2." + (i + 1) + "/32";
+      var addr = (NETDATA.routers[CITY[i][0]] && NETDATA.routers[CITY[i][0]].ip) || ("192.0.2." + (i + 1) + "/32");
       var boxes = "Forwarding, mask, IP" + (role === "Edge" ? ", NAT, firewall" : (role === "Distribution" ? ", firewall" : ""));
       var tr = document.createElement("tr");
-      tr.innerHTML = '<td>'+CITY[i][0]+'</td><td>'+CITY[i][3]+'</td><td>'+role+'</td><td>'+addr+'</td><td class="n">'+deg+'</td><td>'+boxes+'</td>';
+      tr.innerHTML = '<td>'+CITY[i][0]+'</td><td>'+CITY[i][3]+'</td><td>'+role+'</td><td>'+esc(addr)+'</td><td class="n">'+deg+'</td><td>'+boxes+'</td><td>'+esc(hardwareOf(i))+'</td>';
       tb.appendChild(tr); });
 }
 /* REMAP: from the chosen city to the capital of every country, all at once. */
@@ -532,6 +594,12 @@ document.getElementById("honest").innerHTML =
   'of anybody\'s real network</b>, no path here is claimed to exist, '+
   'and no time on this page was measured on a wire.';
 
+document.getElementById("loadBtn").onclick = function(){ document.getElementById("loadFile").click(); };
+document.getElementById("loadFile").onchange = function(e){ var f = e.target.files[0]; if (!f) return;
+  var rd = new FileReader(); rd.onload = function(){ loadNetData(String(rd.result), f.name); }; rd.readAsText(f); };
+document.getElementById("tplBtn").onclick = function(){ var a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(templateCSV()); a.download = "network-data-template.csv"; a.click(); };
+document.getElementById("dataNote").textContent = 'No network data file loaded: hardware and cable providers are not published by carriers, so each row shows the modelled class. LOAD NETWORK DATA puts real makes, models, addresses and providers on every routing.';
 renderBoxes(); renderRouters();
 go(); remap();
 window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
@@ -541,7 +609,7 @@ window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEa
   rebuild:function(){ return rb ? {built:rb.built, hops:rb.p.length-1, total:rb.plan.total, done:!!rb.done,
     stage:document.getElementById("rbStage").textContent} : null; },
   reroute:function(){ reroute(); },
-  boxUs:function(){ return window.__lastBoxUs; }, boxesAt:boxesAt, routers:function(){ return document.querySelectorAll('#rtrT tbody tr').length; },
+  boxUs:function(){ return window.__lastBoxUs; }, load:function(t,n){ loadNetData(t,n||'test.csv'); return NETDATA.rows; }, template:templateCSV, boxesAt:boxesAt, routers:function(){ return document.querySelectorAll('#rtrT tbody tr').length; },
   route:function(a,b){ var p=path(idx(a),idx(b),null); return p?{hops:p.length-1,km:routeKm(p),via:p.map(function(i){return CITY[i][0];})}:null; } };
 </script>
 <script src="tech.js"></script>
