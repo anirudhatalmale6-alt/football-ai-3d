@@ -1,6 +1,5 @@
 // ==============================================================================================
 // profiles.js - the competition profile layer
-// Copyright (c) AI2ORBIT Co. 2026
 //
 // THE POINT OF THIS FILE, IN ONE PARAGRAPH
 //

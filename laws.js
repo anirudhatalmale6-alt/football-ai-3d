@@ -1,6 +1,5 @@
 // ==============================================================================================
 // laws.js - the Laws of the Game as plain data and plain functions
-// Copyright (c) AI2ORBIT Co. 2026
 //
 // WHY THIS IS A SEPARATE FILE, WITH NOTHING GRAPHICAL IN IT
 //

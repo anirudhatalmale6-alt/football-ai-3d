@@ -1,6 +1,5 @@
 """Checks on the playable match, driven through a real browser.
 
-Copyright (c) AI2ORBIT Co. 2026
 
 Everything here asserts on the GAME rather than on pixels, through the documented test hook
 window.__game. A pixel diff can tell you something moved; it cannot tell you the ball went in

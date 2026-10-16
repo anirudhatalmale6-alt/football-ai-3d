@@ -1,6 +1,5 @@
 // ==============================================================================================
 // match.js - the shape of a match: its periods, its officials, and how it is decided
-// Copyright (c) AI2ORBIT Co. 2026
 //
 // Week 1 put the Laws that govern the BALL into laws.js - offside, fouls, restarts, the goal.
 // This file is the other half: the Laws that govern the MATCH. Law 3 (the players and the

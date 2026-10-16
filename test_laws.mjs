@@ -1,6 +1,5 @@
 // ==============================================================================================
 // test_laws.mjs - the rules layer checked with no browser present
-// Copyright (c) AI2ORBIT Co. 2026
 //
 //   node test_laws.mjs
 //

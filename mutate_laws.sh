@@ -1,7 +1,6 @@
 #!/bin/sh
 # ==============================================================================================
 # mutate_laws.sh - break each Law on purpose and check that the suite notices
-# Copyright (c) AI2ORBIT Co. 2026
 #
 #   sh mutate_laws.sh
 #
