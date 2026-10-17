@@ -1,6 +1,7 @@
 #!/bin/sh
 # ==============================================================================================
 # mutate_match.sh - break the match layer and the profiles on purpose, and check the suite notices
+# Copyright (c) AI2ORBIT Co. 2026
 #
 #   sh mutate_match.sh
 #

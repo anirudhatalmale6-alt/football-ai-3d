@@ -1,5 +1,6 @@
 // ==============================================================================================
 // test_match.mjs - the match layer and the competition profiles, checked with no browser present
+// Copyright (c) AI2ORBIT Co. 2026
 //
 //   node test_match.mjs
 //

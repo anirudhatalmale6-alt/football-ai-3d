@@ -1,5 +1,6 @@
 /* THE HARDWARE PANEL.
  *
+ * AI2ORBIT Co. (c) 2026.
  *
  * One panel, shared by every page, with a switch on screen to turn it
  * off. It answers the question "what is this machine, and what is this
