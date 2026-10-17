@@ -49,6 +49,10 @@
   button.go{background:var(--go);border-color:var(--go);color:#fff;font-weight:700}
   button.alt{background:var(--pan);border-color:var(--alt);color:var(--alt)}
   svg{width:100%;height:auto;background:#0e141b;border:1px solid var(--line)}
+  #map line{vector-effect:non-scaling-stroke}
+  .zwrap{position:relative} .zb{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:4px}
+  .zb button{min-width:34px;height:32px;padding:0 6px;font-size:15px}
+  .zhint{font-size:11px;color:#7c93a6;margin-top:3px}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
          gap:8px;margin-top:10px}
   .card{background:var(--pan);border:1px solid var(--line);padding:8px 10px}
@@ -81,7 +85,9 @@
     <div><label>&nbsp;</label><button class="alt" id="remap">REMAP</button></div>
   </div>
 
-  <svg id="map" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid meet"></svg>
+  <div class="zwrap"><svg id="map" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="zb"><button id="zIn" title="Zoom in">+</button><button id="zOut" title="Zoom out">-</button><button id="zAll" title="All of Europe">ALL</button></div></div>
+  <div class="zhint" id="zHint">Zoom: wheel, pinch or the buttons, then drag to move</div>
 
   <div class="cards" id="cards"></div>
   <div id="rebuild" style="display:none;margin-top:10px;border:1px solid #c8942a;padding:8px 10px;background:#17130a">
@@ -98,6 +104,11 @@
   <div id="dataNote" style="margin-top:8px;font-size:12px;color:#7c93a6"></div>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">THE BOXES IN A ROUTER, ESTIMATED</h2>
   <table id="boxT"><thead><tr><th>box</th><th>where</th><th class="n">time us</th><th class="n">same as fibre km</th><th>what it does</th></tr></thead><tbody></tbody></table>
+  <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">THETA AT EVERY BORDER CROSSING ON THIS ROUTE, GIVEN NUMBERS</h2>
+  <table id="thetaT"><thead><tr><th>hop</th><th>crossing</th><th>into</th><th class="n">theta given</th></tr></thead><tbody></tbody></table>
+  <div id="thetaNote" style="margin-top:6px;font-size:12px;color:#7c93a6"></div>
+  <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">THETA TABLE, EUROPE AND ELSEWHERE, GIVEN NUMBERS</h2>
+  <table id="thetaAll"><thead><tr><th>country or area</th><th class="n">theta given</th><th>also given</th><th>on this map</th></tr></thead><tbody></tbody></table>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">EVERY ROUTER, MODELLED</h2>
   <table id="rtrT"><thead><tr><th>router</th><th>country</th><th>role</th><th>address</th><th>links</th><th>boxes</th><th>hardware</th></tr></thead><tbody></tbody></table>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">EVERY COUNTRY FROM <span id="rmFrom"></span></h2>
@@ -295,7 +306,7 @@ elFrom.value=idx("Dublin"); elTo.value=idx("Moscow");     /* Ireland to Russia *
 var current=null, avoided=[];
 
 function draw(p){
-  var s="";
+  var s="", k=VZ.w/1000, all=VZ.w<=420;
   links.forEach(function(l){
     var a=xy(CITY[l[0]]), b=xy(CITY[l[1]]);
     s+='<line x1="'+a[0].toFixed(1)+'" y1="'+a[1].toFixed(1)+
@@ -313,11 +324,11 @@ function draw(p){
     var q=xy(c), on=p&&p.indexOf(i)>=0;
     var r=on?5:3, fill=on?(avoided.length?"#c8942a":"#2f9e5e"):"#456073";
     if(p&&(i===p[0]||i===p[p.length-1])){r=7;fill="#dbe7f0";}
-    s+='<circle cx="'+q[0].toFixed(1)+'" cy="'+q[1].toFixed(1)+'" r="'+r+
+    s+='<circle cx="'+q[0].toFixed(1)+'" cy="'+q[1].toFixed(1)+'" r="'+(r*k).toFixed(2)+
        '" fill="'+fill+'"/>';
-    if(on||r===7)
-      s+='<text x="'+(q[0]+8).toFixed(1)+'" y="'+(q[1]+4).toFixed(1)+
-         '" fill="#dbe7f0" font-size="11" font-family="monospace">'+c[0]+'</text>';
+    if(on||r===7||all)
+      s+='<text x="'+(q[0]+8*k).toFixed(1)+'" y="'+(q[1]+4*k).toFixed(1)+
+         '" fill="'+(on||r===7?'#dbe7f0':'#8aa0b3')+'" font-size="'+(11*k).toFixed(2)+'" font-family="monospace">'+c[0]+'</text>';
   });
   svg.innerHTML=s;
 }
@@ -327,7 +338,7 @@ function show(p){
   var tb=document.querySelector("#hops tbody"); tb.innerHTML="";
   if(!p){ document.getElementById("cards").innerHTML=
     '<div class="card"><div class="k">no path</div><div class="v">&mdash;</div></div>';
-    draw(null); return; }
+    draw(null); renderTheta(null); return; }
   var run=0, i, straight=km(CITY[p[0]],CITY[p[p.length-1]]);
   for(i=0;i<p.length;i++){
     var leg = i? km(CITY[p[i-1]],CITY[p[i]]) : 0;
@@ -360,8 +371,73 @@ function show(p){
   document.getElementById("cards").innerHTML = cards.map(function(c){
     return '<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>';
   }).join("");
-  draw(p);
+  draw(p); renderTheta(p);
 }
+
+/* THETA TABLE. The numbers per country exactly as they were given, nothing worked out or
+   measured - "a map of numbers". A crossing counts where one hop is in another country than the
+   hop before; the number shown is the one given for the country entered. */
+var THETA = [
+  ["France",30,""],["Germany",6,""],["Finland",11,""],["Sweden",30,""],["Denmark",15,""],["Netherlands",500,""],
+  ["Spain",150,""],["Portugal",30,""],["Italy",1.7,"Sicily the same"],["Greece",30,""],["Austria",0.106,"1,7 divided by 16"],
+  ["Switzerland",11,"Usually a bit less, 7"],["Hungary",1.8,"1 if not counted as western"],["Russia",6,"West; east 1,11"],
+  ["India",750,"752 or 368"],["Bangladesh",25,""],["Sri Lanka",7,""],["Vietnam",50.5,""],["Cambodia",16,"15 or 14"]];
+function thetaOf(country){ for (var i = 0; i < THETA.length; i++) if (THETA[i][0] === country) return THETA[i]; return null; }
+function fmtT(v){ return String(v).replace('.', ','); }
+function renderTheta(p){
+  var tb = document.querySelector("#thetaT tbody"); tb.innerHTML = ""; var n = 0, sum = 0, missing = 0;
+  if (p) for (var i = 1; i < p.length; i++){
+    var a = CITY[p[i-1]], b = CITY[p[i]]; if (a[3] === b[3]) continue;
+    var t = thetaOf(b[3]); n++; if (t) sum += t[1]; else missing++;
+    var tr = document.createElement("tr");
+    tr.innerHTML = '<td>' + i + '</td><td>' + esc(a[0] + ', ' + a[3] + ' to ' + b[0]) + '</td><td>' + esc(b[3]) + '</td><td class="n">' + (t ? fmtT(t[1]) : 'Not given') + '</td>';
+    tb.appendChild(tr);
+  }
+  window.__theta = { crossings: n, sum: Math.round(sum * 1000) / 1000, missing: missing };
+  document.getElementById("thetaNote").textContent = p ? (n + ' border crossings on this route, given numbers add up to ' + fmtT(Math.round(sum * 1000) / 1000)
+    + (missing ? ', ' + missing + ' countries with no number given yet' : '') + '. Numbers as given, not measured.') : '';
+}
+function renderThetaAll(){
+  var tb = document.querySelector("#thetaAll tbody"); tb.innerHTML = ""; var onMap = {};
+  CITY.forEach(function(c){ onMap[c[3]] = 1; });
+  THETA.forEach(function(t){ var tr = document.createElement("tr");
+    tr.innerHTML = '<td>' + esc(t[0]) + '</td><td class="n">' + fmtT(t[1]) + '</td><td>' + esc(t[2] || '-') + '</td><td>' + (onMap[t[0]] ? 'Yes' : 'Outside Europe') + '</td>';
+    tb.appendChild(tr); });
+}
+
+/* ZOOM. The map is drawn in its own units; zooming changes which part of them the screen shows.
+   Dots, names and line widths are kept the same size on screen at every zoom. */
+var VZ = { x: 0, y: 0, w: 1000, h: 620 };
+function setVZ(){ VZ.w = Math.max(40, Math.min(1000, VZ.w)); VZ.h = VZ.w * 0.62;
+  VZ.x = Math.max(-VZ.w * 0.5, Math.min(1000 - VZ.w * 0.5, VZ.x)); VZ.y = Math.max(-VZ.h * 0.5, Math.min(620 - VZ.h * 0.5, VZ.y));
+  if (VZ.w === 1000){ VZ.x = 0; VZ.y = 0; }
+  svg.setAttribute("viewBox", VZ.x.toFixed(2) + " " + VZ.y.toFixed(2) + " " + VZ.w.toFixed(2) + " " + VZ.h.toFixed(2));
+  svg.style.touchAction = VZ.w < 1000 ? "none" : "pan-y"; svg.style.cursor = VZ.w < 1000 ? "grab" : "zoom-in";
+  document.getElementById("zHint").textContent = VZ.w < 1000 ? 'Zoom ' + (1000 / VZ.w).toFixed(1).replace('.', ',') + ' times - drag to move, ALL for the whole map'
+    : 'Zoom: wheel, pinch or the buttons, then drag to move';
+  draw(current); }
+function svgPt(cx, cy){ var r = svg.getBoundingClientRect(), s = Math.max(VZ.w / r.width, VZ.h / r.height);
+  var ox = (r.width - VZ.w / s) / 2, oy = (r.height - VZ.h / s) / 2;
+  return [VZ.x + (cx - r.left - ox) * s, VZ.y + (cy - r.top - oy) * s]; }
+function zoomBy(f, cx, cy){ var a = svgPt(cx, cy), w = Math.max(40, Math.min(1000, VZ.w / f)), g = w / VZ.w;
+  VZ.x = a[0] - (a[0] - VZ.x) * g; VZ.y = a[1] - (a[1] - VZ.y) * g; VZ.w = w; setVZ(); }
+(function(){
+  var pts = {}, last = null;
+  svg.addEventListener('wheel', function(e){ e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8, e.clientX, e.clientY); }, { passive: false });
+  svg.addEventListener('dblclick', function(e){ zoomBy(2, e.clientX, e.clientY); });
+  svg.addEventListener('pointerdown', function(e){ pts[e.pointerId] = [e.clientX, e.clientY]; last = null; try { svg.setPointerCapture(e.pointerId); } catch (x){} });
+  svg.addEventListener('pointermove', function(e){ if (!pts[e.pointerId]) return; var ids = Object.keys(pts), p = [e.clientX, e.clientY];
+    if (ids.length >= 2){ var o = pts[ids[0] == e.pointerId ? ids[1] : ids[0]], d = Math.hypot(p[0] - o[0], p[1] - o[1]);
+      if (last) zoomBy(d / last, (p[0] + o[0]) / 2, (p[1] + o[1]) / 2); last = d; }
+    else if (VZ.w < 1000){ var a = svgPt(pts[e.pointerId][0], pts[e.pointerId][1]), b = svgPt(p[0], p[1]); VZ.x += a[0] - b[0]; VZ.y += a[1] - b[1]; setVZ(); }
+    pts[e.pointerId] = p; });
+  function up(e){ delete pts[e.pointerId]; last = null; }
+  svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
+  function mid(){ var r = svg.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
+  document.getElementById("zIn").onclick = function(){ var m = mid(); zoomBy(1.6, m[0], m[1]); };
+  document.getElementById("zOut").onclick = function(){ var m = mid(); zoomBy(1 / 1.6, m[0], m[1]); };
+  document.getElementById("zAll").onclick = function(){ VZ = { x: 0, y: 0, w: 1000, h: 620 }; setVZ(); };
+})();
 
 function go(){ avoided=[]; rb=null; document.getElementById("rebuild").style.display="none"; show(path(+elFrom.value,+elTo.value,null)); }
 
@@ -602,11 +678,11 @@ document.getElementById("loadFile").onchange = function(e){ var f = e.target.fil
 document.getElementById("tplBtn").onclick = function(){ var a = document.createElement("a");
   a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(templateCSV()); a.download = "network-data-template.csv"; a.click(); };
 document.getElementById("dataNote").textContent = 'No network data file loaded: hardware and cable providers are not published by carriers, so each row shows the modelled class. LOAD NETWORK DATA puts real makes, models, addresses and providers on every routing.';
-renderBoxes(); renderRouters();
+renderBoxes(); renderRouters(); renderThetaAll();
 go(); remap();
 window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
   links:function(){ return links.length; }, sea:function(){ return links.filter(function(l){return l[3]==='sea';}).map(function(l){return CITY[l[0]][0]+'-'+CITY[l[1]][0];}); },
-  check:selfCheck, fails:function(){ return checkFails; },
+  check:selfCheck, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
   plan:function(hops){ var p=[]; for(var i=0;i<=hops;i++) p.push(i); return rebuildPlan(p); },
   rebuild:function(){ return rb ? {built:rb.built, hops:rb.p.length-1, total:rb.plan.total, done:!!rb.done,
     stage:document.getElementById("rbStage").textContent} : null; },
