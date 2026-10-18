@@ -77,6 +77,7 @@
   <div class="bar">
     <div><label>from</label><select id="from"></select></div>
     <div><label>to</label><select id="to"></select></div>
+    <div><label>weigh routes by</label><select id="weigh"><option value="km">Cable km</option><option value="r">Cable km and R at crossings</option></select></div>
     <div><label>&nbsp;</label><button class="go" id="route">ROUTE</button></div>
     <div><label>&nbsp;</label><button class="alt" id="reroute">REROUTE</button></div>
     <div><label>&nbsp;</label><button id="csv">EXPORT CSV</button></div>
@@ -99,9 +100,12 @@
   </div>
   <table id="hops"><thead><tr><th>#</th><th>exchange</th>
     <th class="n">leg km</th><th class="n">running km</th>
-    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th><th>hardware</th><th>cable in, provider</th></tr></thead><tbody></tbody></table>
+    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th><th>hardware</th><th>cable in, provider</th><th class="n">R entering</th></tr></thead><tbody></tbody></table>
 
   <div id="dataNote" style="margin-top:8px;font-size:12px;color:#7c93a6"></div>
+  <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">FULL PARTING, EVERY PART OF THE NETWORK CHECKED</h2>
+  <table id="partT"><thead><tr><th>part</th><th class="n">cities</th><th class="n">countries</th><th>reached from the start</th></tr></thead><tbody></tbody></table>
+  <div id="partNote" style="margin-top:6px;font-size:12px;color:#7c93a6"></div>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">THE BOXES IN A ROUTER, ESTIMATED</h2>
   <table id="boxT"><thead><tr><th>box</th><th>where</th><th class="n">time us</th><th class="n">same as fibre km</th><th>what it does</th></tr></thead><tbody></tbody></table>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">THETA AT EVERY BORDER CROSSING ON THIS ROUTE, GIVEN NUMBERS</h2>
@@ -284,7 +288,7 @@ function path(s,t,avoid){
       var v=adj[u][i];
       if(avoid && avoid.indexOf(u+'-'+v)>=0) continue;
       if(avoid && avoid.indexOf(v+'-'+u)>=0) continue;
-      var w=km(CITY[u],CITY[v]);
+      var w=wt(u,v);
       if(dist[u]+w<dist[v]){dist[v]=dist[u]+w;prev[v]=u;}
     }
   }
@@ -350,7 +354,8 @@ function show(p){
       '<td class="n">'+(i?ms(leg*CABLE_FACTOR).toFixed(2):"&mdash;")+'</td>';
     var bx = boxesAt(i, p.length - 1), us = boxUs(bx);
     tr.innerHTML += '<td>'+bx.map(function(k){ return BOXES[k][0]; }).join(", ")+'</td><td class="n">'+us.toFixed(1)+'</td><td class="n">'+fibreKm(us).toFixed(1)+'</td>'
-      + '<td>'+esc(hardwareOf(p[i]))+'</td><td>'+(i ? esc(cableOf(p[i-1], p[i], leg)) : '&mdash;')+'</td>';
+      + '<td>'+esc(hardwareOf(p[i]))+'</td><td>'+(i ? esc(cableOf(p[i-1], p[i], leg)) : '&mdash;')+'</td>'
+      + '<td class="n">'+(i && rAt(p[i-1], p[i]) !== null ? fmtT(rAt(p[i-1], p[i])) : (i && CITY[p[i-1]][3] !== CITY[p[i]][3] ? 'Not given' : '&mdash;'))+'</td>';
     tb.appendChild(tr);
   }
   var cable=run*CABLE_FACTOR;
@@ -366,7 +371,9 @@ function show(p){
     ["in the boxes", (boxTotal/1000).toFixed(2)+" ms"],
     ["one way with boxes", (ms(cable)+boxTotal/1000).toFixed(2)+" ms"],
     ["straight line", straight.toFixed(0)+" km"],
-    ["going round by", ((run/straight-1)*100).toFixed(0)+"%"]
+    ["going round by", ((run/straight-1)*100).toFixed(0)+"%"],
+    ["R on route, in series", fmtT(Math.round(routeR(p)*1000)/1000)],
+    ["weighed by", WEIGH==="r" ? "km and R" : "km"]
   ];
   document.getElementById("cards").innerHTML = cards.map(function(c){
     return '<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>';
@@ -405,6 +412,54 @@ function renderThetaAll(){
     tb.appendChild(tr); });
 }
 
+/* R AT THE CROSSINGS. The given theta of the country entered is the resistance R of that border
+   crossing. Along a route the crossings are in series, so their R adds up (Kirchhoff). With
+   "km and R" chosen, each crossing costs its R on top of the cable km - one unit of R the same
+   as one km - and routes, reroutes and the remap all go round the high-R borders. */
+var WEIGH = "km";
+function rAt(u, v){ if (CITY[u][3] === CITY[v][3]) return null; var t = thetaOf(CITY[v][3]); return t ? t[1] : null; }
+function wt(u, v){ var w = km(CITY[u], CITY[v]); if (WEIGH === "r"){ var r = rAt(u, v); if (r) w += r; } return w; }
+function routeR(p){ var r = 0; for (var i = 1; i < p.length; i++){ var x = rAt(p[i-1], p[i]); if (x) r += x; } return r; }
+function routeCost(p){ var c = 0; for (var i = 1; i < p.length; i++) c += wt(p[i-1], p[i]); return c; }
+
+/* FULL PARTING. After a reroute every part of the network is taken and checked, not only the
+   route: the cut links are removed, the network is split into its connected parts, every city
+   is routed to from the start, and each of those routes is checked to be the shortest a second
+   way. A part that can no longer be reached is listed, never hidden. */
+function partsWithout(av){
+  var comp = CITY.map(function(){ return -1; }), k = 0, cut = {};
+  (av || []).forEach(function(x){ cut[x] = 1; var ab = x.split('-'); cut[ab[1] + '-' + ab[0]] = 1; });
+  for (var i = 0; i < CITY.length; i++) if (comp[i] < 0){
+    var st = [i]; comp[i] = k;
+    while (st.length){ var u = st.pop(); adj[u].forEach(function(v){ if (comp[v] < 0 && !cut[u + '-' + v]){ comp[v] = k; st.push(v); } }); }
+    k++;
+  }
+  return { comp: comp, n: k };
+}
+function bellmanAv(s, av){
+  var cut = {}; (av || []).forEach(function(x){ cut[x] = 1; var ab = x.split('-'); cut[ab[1] + '-' + ab[0]] = 1; });
+  var d = CITY.map(function(){ return Infinity; }), k; d[s] = 0;
+  for (k = 0; k < CITY.length; k++) links.forEach(function(l){ var a = l[0], b = l[1]; if (cut[a + '-' + b]) return;
+    if (d[a] + wt(a, b) < d[b]) d[b] = d[a] + wt(a, b); if (d[b] + wt(b, a) < d[a]) d[a] = d[b] + wt(b, a); });
+  return d;
+}
+function fullParting(){
+  var s0 = +elFrom.value, P = partsWithout(avoided), d2 = bellmanAv(s0, avoided), reach = 0, bad = 0, t0 = performance.now();
+  var parts = []; for (var k = 0; k < P.n; k++) parts.push({ cities: 0, countries: {}, start: false });
+  CITY.forEach(function(c, i){ var q = parts[P.comp[i]]; q.cities++; q.countries[c[3]] = 1; if (i === s0) q.start = true; });
+  CITY.forEach(function(c, i){ if (i === s0) return; var p = path(s0, i, avoided.length ? avoided : null);
+    if (p){ reach++; if (Math.abs(routeCost(p) - d2[i]) > 1e-6) bad++; } else if (d2[i] !== Infinity) bad++; });
+  var tb = document.querySelector("#partT tbody"); tb.innerHTML = "";
+  parts.forEach(function(q, k){ var tr = document.createElement("tr");
+    tr.innerHTML = '<td>Part ' + (k + 1) + '</td><td class="n">' + q.cities + '</td><td class="n">' + Object.keys(q.countries).length + '</td><td>'
+      + (q.start ? 'Yes, the start is in it' : 'No, cut off') + '</td>'; tb.appendChild(tr); });
+  window.__parting = { parts: P.n, reached: reach, of: CITY.length - 1, wrong: bad, cuts: avoided.length, ms: performance.now() - t0 };
+  document.getElementById("partNote").textContent = (avoided.length ? avoided.length + ' links cut. ' : 'No links cut. ') + P.n + (P.n === 1 ? ' part' : ' parts')
+    + ', ' + reach + ' of ' + (CITY.length - 1) + ' cities reached from ' + CITY[s0][0] + ', ' + (bad ? bad + ' routes NOT the shortest' : 'every route checked the shortest a second way')
+    + ', ' + links.length + ' links looked at.';
+  return window.__parting;
+}
+
 /* ZOOM. The map is drawn in its own units; zooming changes which part of them the screen shows.
    Dots, names and line widths are kept the same size on screen at every zoom. */
 var VZ = { x: 0, y: 0, w: 1000, h: 620 };
@@ -439,7 +494,7 @@ function zoomBy(f, cx, cy){ var a = svgPt(cx, cy), w = Math.max(40, Math.min(100
   document.getElementById("zAll").onclick = function(){ VZ = { x: 0, y: 0, w: 1000, h: 620 }; setVZ(); };
 })();
 
-function go(){ avoided=[]; rb=null; document.getElementById("rebuild").style.display="none"; show(path(+elFrom.value,+elTo.value,null)); }
+function go(){ avoided=[]; rb=null; document.getElementById("rebuild").style.display="none"; show(path(+elFrom.value,+elTo.value,null)); fullParting(); }
 
 /* REROUTE.  Takes the first link of the current path out of the
    network and finds the best way round it - which is what a
@@ -490,7 +545,7 @@ function reroute(){
   avoided.push(current[0]+'-'+current[1]);
   var p=path(+elFrom.value,+elTo.value,avoided);
   if(!p){ avoided.pop(); alert("no way round that one"); return; }
-  show(p); startRebuild(p);
+  show(p); startRebuild(p); fullParting(); remap();
 }
 
 /* THE BOXES IN EACH ROUTER, ESTIMATED. A packet does not only travel the fibre - every router it
@@ -612,8 +667,8 @@ function remap(){
    again a second way), and the distances the same both ways. */
 function bellman(s,t){
   var d=CITY.map(function(){return Infinity;}), k; d[s]=0;
-  for(k=0;k<CITY.length;k++) links.forEach(function(l){ var w=km(CITY[l[0]],CITY[l[1]]);
-    if(d[l[0]]+w<d[l[1]]) d[l[1]]=d[l[0]]+w; if(d[l[1]]+w<d[l[0]]) d[l[0]]=d[l[1]]+w; });
+  for(k=0;k<CITY.length;k++) links.forEach(function(l){ var a=l[0], b=l[1];
+    if(d[a]+wt(a,b)<d[b]) d[b]=d[a]+wt(a,b); if(d[b]+wt(b,a)<d[a]) d[a]=d[b]+wt(b,a); });
   return d[t];
 }
 var checkFails=[];
@@ -624,9 +679,10 @@ function selfCheck(){
   Object.keys(countries).forEach(function(k){ if(countries[k]!==1) f.push(k+' has '+countries[k]+' capitals marked'); });
   var seed=7; function rnd(){ seed=(seed*1103515245+12345)%2147483648; return seed/2147483648; }
   for(var n=0;n<30;n++){ var a=Math.floor(rnd()*CITY.length), b=Math.floor(rnd()*CITY.length); if(a===b) continue;
-    var p=path(a,b,null), d=routeKm(p), d2=bellman(a,b);
+    var p=path(a,b,null), d=routeCost(p), d2=bellman(a,b);
     if(Math.abs(d-d2)>1e-6) f.push('the route '+CITY[a][0]+' to '+CITY[b][0]+' is not the shortest');
     if(Math.abs(km(CITY[a],CITY[b])-km(CITY[b],CITY[a]))>1e-9) f.push('a distance differs by direction'); }
+  if(window.__parting && window.__parting.wrong) f.push(window.__parting.wrong+' routes after the parting are not the shortest');
   checkFails=f;
   var el=document.getElementById("checks");
   el.innerHTML = f.length ? '<b style="color:#c8462a">THIS PAGE IS NOT CLEAN</b><br>'+f.join('<br>')
@@ -637,6 +693,7 @@ function selfCheck(){
 document.getElementById("remap").onclick=remap;
 elFrom.addEventListener("change", function(){ go(); remap(); });
 document.getElementById("route").onclick=go;
+document.getElementById("weigh").onchange=function(){ WEIGH=this.value; go(); remap(); };
 document.getElementById("reroute").onclick=reroute;
 document.getElementById("csv").onclick=function(){
   if(!current) return;
@@ -682,7 +739,7 @@ renderBoxes(); renderRouters(); renderThetaAll();
 go(); remap();
 window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
   links:function(){ return links.length; }, sea:function(){ return links.filter(function(l){return l[3]==='sea';}).map(function(l){return CITY[l[0]][0]+'-'+CITY[l[1]][0];}); },
-  check:selfCheck, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
+  check:selfCheck, parting:function(){ return window.__parting; }, weigh:function(m){ WEIGH=m; document.getElementById('weigh').value=m; go(); remap(); return { r: routeR(current), km: routeKm(current), via: current.map(function(i){ return CITY[i][0]; }) }; }, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
   plan:function(hops){ var p=[]; for(var i=0;i<=hops;i++) p.push(i); return rebuildPlan(p); },
   rebuild:function(){ return rb ? {built:rb.built, hops:rb.p.length-1, total:rb.plan.total, done:!!rb.done,
     stage:document.getElementById("rbStage").textContent} : null; },
