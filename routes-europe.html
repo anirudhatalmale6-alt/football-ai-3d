@@ -522,7 +522,7 @@ function k9(p){
    ['K9 add-on', nsTxt(t.ns) + ' ns = ' + nsTxt(t.ns / 1e6) + ' ms'],
    ['One way with add-on', nsTxt(Math.round((oneWay + t.ns / 1e6) * 10000) / 10000) + ' ms (fibre and boxes ' + nsTxt(Math.round(oneWay * 10000) / 10000) + ' ms)'],
    ['Ping with add-on', nsTxt(k9val('k9Ping')) + ' ms becomes ' + nsTxt(Math.round((k9val('k9Ping') + t.ns / 1e6) * 1e6) / 1e6) + ' ms'],
-   ['Given example check', nsTxt(k9val('k9ExKm')) + ' km = ' + ex.n + ' parts, ' + nsTxt(ex.thetas) + ' thetas, ' + nsTxt(ex.thetaNs) + ' ns from distance'],
+   ['Given example check', nsTxt(k9val('k9ExKm')) + ' km = ' + ex.n + ' parts, ' + nsTxt(ex.thetas) + ' thetas, ' + nsTxt(ex.thetaNs) + ' ns from distance, ping ' + nsTxt(k9val('k9Ping')) + ' ms becomes ' + (k9val('k9Ping') + ex.thetaNs / 1e6).toLocaleString('fi-FI', { maximumFractionDigits: 6 }) + ' ms'],
    ['What this is', 'The given model, as stated, kept apart from the measured physics']]
   .forEach(function(r){ var tr = document.createElement("tr"); tr.innerHTML = '<td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td>'; sb.appendChild(tr); });
   window.__k9 = { km: km, parts: t.n, thetas: t.thetas, thetaNs: t.thetaNs, crossNs: t.crossNs, errorNs: t.errorNs, rndNs: t.rndNs, ns: t.ns,
