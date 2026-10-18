@@ -111,6 +111,9 @@
   <div id="partNote" style="margin-top:6px;font-size:12px;color:#7c93a6"></div>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">BACKGROUND, EVERY ROUTE CALCULATED ALL THE TIME</h2>
   <table id="bgT"><tbody></tbody></table>
+  <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">EVERY LINE, CALCULATED ONCE A MINUTE</h2>
+  <div id="lnNote" style="font-size:12px;color:#7c93a6;margin-bottom:4px"></div>
+  <div style="max-height:320px;overflow:auto"><table id="lnT"><thead><tr><th>line</th><th class="n">km</th><th class="n">cable km</th><th class="n">fibre ns</th><th class="n">cable part ns</th><th class="n">machine part ns</th><th class="n">line total ns</th><th>state</th></tr></thead><tbody></tbody></table></div>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">K9 THETA ADD-ON TO DISTANCE, GIVEN MODEL, PART BY PART</h2>
   <div class="k9v">
     <label>part length km<input id="k9Part" type="number" step="any" value="500"></label>
@@ -123,6 +126,10 @@
     <label>RND deducted ns<input id="k9Rd" type="number" step="any" value="24"></label>
     <label>ping ms<input id="k9Ping" type="number" step="any" value="10"></label>
     <label>K9 divisor<input id="k9Div" type="number" step="any" value="5.01"></label>
+    <label>cable part<input id="lnCp" type="number" step="any" value="0.413"></label>
+    <label>cable extra delay ns<input id="lnCd" type="number" step="any" value="0.19"></label>
+    <label>machine part<input id="lnMp" type="number" step="any" value="0.601"></label>
+    <label>machine delay ns<input id="lnMd" type="number" step="any" value="3.79"></label>
     <label>crossing thetas<select id="k9Cross"><option value="1">Included</option><option value="0">Left out</option></select></label>
   </div>
   <table id="k9T"><thead><tr><th>part</th><th class="n">km in part</th><th class="n">thetas</th><th class="n">theta ns</th><th class="n">errors</th><th class="n">error ns</th><th>RND</th><th class="n">part ns</th></tr></thead><tbody></tbody></table>
@@ -499,7 +506,10 @@ function fullParting(){
    Every figure is a setting, so the model can be changed without changing the page. */
 function k9val(id){ var v = parseFloat(document.getElementById(id).value); return isFinite(v) ? v : 0; }
 function k9rng(seed){ return function(){ seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }; }
-function k9calc(km, crossT, seed){
+/* EVERY LINE gets the given cable and machine parts: cable part 0,413 with its extra delay 0,19,
+   machine part 0,601 with its delay 3,79. No unit was given; they are taken as ns. */
+function lineAddNs(){ return k9val('lnCp') * k9val('lnCd') + k9val('lnMp') * k9val('lnMd'); }
+function k9calc(km, crossT, seed, hops){
   var P = k9val('k9Part') || 500, perKm = k9val('k9ExT') / (k9val('k9ExKm') || 1), ns = k9val('k9Ns'), succ = k9val('k9Succ'),
       eNs = k9val('k9Err'), rp = k9val('k9Rp'), rd = k9val('k9Rd'), n = Math.ceil(km / P) + 1, rnd = k9rng(seed || 7), parts = [], left = km;
   for (var i = 0; i < n; i++){
@@ -510,6 +520,7 @@ function k9calc(km, crossT, seed){
   var t = { parts: parts, n: n, thetas: 0, thetaNs: 0, errorNs: 0, rndNs: 0, crossThetas: crossT, crossNs: crossT * ns };
   parts.forEach(function(q){ q.ns = q.thetaNs + q.errorNs + q.rndNs; t.thetas += q.thetas; t.thetaNs += q.thetaNs; t.errorNs += q.errorNs; t.rndNs += q.rndNs; });
   t.ns = t.thetaNs + t.errorNs + t.rndNs + t.crossNs; t.expectedRndNs = -n * rp * rd;
+  t.lineNs = (hops || 0) * lineAddNs(); t.ns += t.lineNs;
   return t;
 }
 function nsTxt(v){ return (Math.round(v * 1000) / 1000).toLocaleString('fi-FI'); }
@@ -517,7 +528,7 @@ function k9(p){
   var tb = document.querySelector("#k9T tbody"), sb = document.querySelector("#k9S tbody"); tb.innerHTML = ""; sb.innerHTML = "";
   if (!p) return null;
   var km = routeKm(p), cross = document.getElementById('k9Cross').value === '1' ? routeR(p) : 0;
-  var t = k9calc(km, cross, p[0] * 1000 + p[p.length - 1] + 1);
+  var t = k9calc(km, cross, p[0] * 1000 + p[p.length - 1] + 1, p.length - 1);
   t.parts.forEach(function(q, i){ var tr = document.createElement("tr");
     tr.innerHTML = '<td>Part ' + (i + 1) + '</td><td class="n">' + nsTxt(q.km) + '</td><td class="n">' + nsTxt(q.thetas) + '</td><td class="n">' + nsTxt(q.thetaNs)
       + '</td><td class="n">' + nsTxt(q.errors) + '</td><td class="n">' + nsTxt(q.errorNs) + '</td><td>' + (q.rnd ? 'Hit, ' + nsTxt(q.rndNs) + ' ns' : 'No') + '</td><td class="n">' + nsTxt(q.ns) + '</td>';
@@ -526,6 +537,7 @@ function k9(p){
   [['Distance, route', nsTxt(km) + ' km in ' + t.n + ' parts, the last one the end part'],
    ['Thetas from distance', nsTxt(t.thetas) + ' thetas, ' + nsTxt(t.thetaNs) + ' ns'],
    ['Thetas at border crossings', nsTxt(t.crossThetas) + ' thetas, ' + nsTxt(t.crossNs) + ' ns'],
+   ['Lines on route', (p.length - 1) + ' lines, ' + nsTxt(lineAddNs()) + ' ns each (cable and machine parts), ' + nsTxt(t.lineNs) + ' ns'],
    ['Errors', nsTxt(1 - k9val('k9Succ')) + ' a part, ' + nsTxt(t.errorNs) + ' ns, success rate ' + nsTxt(k9val('k9Succ'))],
    ['RND', nsTxt(t.rndNs) + ' ns this route, ' + nsTxt(t.expectedRndNs) + ' ns on average'],
    ['K9 add-on', nsTxt(t.ns) + ' ns = ' + nsTxt(t.ns / 1e6) + ' ms'],
@@ -571,15 +583,68 @@ function bgStep(){
       var r = spAll(BG.s), a = BG.acc;
       for (var t = 0; t < CITY.length; t++){ if (t === BG.s) continue; a.routes++;
         if (r.dist[t] === Infinity) continue; a.reached++;
-        var c = r.prev[t], kmT = 0, x = t;
-        while (c >= 0){ kmT += km(CITY[c], CITY[x]); if (c !== BG.s && noRelay(c)) a.viaNoRelay++; x = c; c = r.prev[c]; }
+        var c = r.prev[t], kmT = 0, x = t, hp = 0;
+        while (c >= 0){ kmT += km(CITY[c], CITY[x]); hp++; if (c !== BG.s && noRelay(c)) a.viaNoRelay++; x = c; c = r.prev[c]; }
         a.km += kmT; if (kmT > a.maxKm) a.maxKm = kmT;
-        var k = k9calc(kmT, 0, 7); a.addNs += k.ns; a.parts += k.n;
+        var k = k9calc(kmT, 0, 7, hp); a.addNs += k.ns; a.parts += k.n;
       }
       if (++BG.s >= CITY.length){ BG.cycle++; BG.acc.ms = performance.now() - BG.t0; BG.last = BG.acc; BG.acc = null; bgRender(); }
     }
   } catch (e){ BG.err = String(e && e.message || e); }
-  setTimeout(bgStep, 30);
+  if (!BGW.on) setTimeout(bgStep, 30);
+}
+/* THREE CPU THREADS. The same calculation split over three workers, each its own thread on its
+   own processor core: worker 1 takes cities 1, 4, 7..., worker 2 takes 2, 5, 8..., worker 3 the
+   rest. The three results are added into one cycle. If a browser will not start workers, the
+   slices between frames above do the same work on the page's own thread. */
+var BGW = { on: false, workers: [], got: [], t0: 0, n: 3 };
+var BG_WORKER = [
+"onmessage = function(e){ var D = e.data, t0 = Date.now(), n = D.n, acc = { routes: 0, reached: 0, km: 0, maxKm: 0, addNs: 0, viaNoRelay: 0, parts: 0 };",
+"  for (var s = D.k; s < n; s += D.K){",
+"    var dist = [], prev = [], seen = [], i;",
+"    for (i = 0; i < n; i++){ dist.push(Infinity); prev.push(-1); seen.push(false); }",
+"    dist[s] = 0;",
+"    for (;;){ var u = -1, best = Infinity;",
+"      for (i = 0; i < n; i++) if (!seen[i] && dist[i] < best){ best = dist[i]; u = i; }",
+"      if (u < 0) break; seen[u] = true; if (u !== s && D.noRelay[u]) continue;",
+"      for (var j = 0; j < D.adj[u].length; j++){ var v = D.adj[u][j]; if (D.cut[u + '-' + v]) continue; var w = D.w[u][j]; if (dist[u] + w < dist[v]){ dist[v] = dist[u] + w; prev[v] = u; } } }",
+"    for (var t = 0; t < n; t++){ if (t === s) continue; acc.routes++; if (dist[t] === Infinity) continue; acc.reached++;",
+"      var c = prev[t], x = t, kmT = 0, hp = 0;",
+"      while (c >= 0){ kmT += D.kmE[c][D.adj[c].indexOf(x)]; hp++; if (c !== s && D.noRelay[c]) acc.viaNoRelay++; x = c; c = prev[c]; }",
+"      acc.km += kmT; if (kmT > acc.maxKm) acc.maxKm = kmT;",
+"      var K = D.k9, parts = Math.ceil(kmT / K.P) + 1, left = kmT, seed = 7, ns = 0;",
+"      for (var q = 0; q < parts; q++){ var pk = Math.max(0, Math.min(K.P, left)); left -= pk; seed = (seed * 1103515245 + 12345) % 2147483648;",
+"        ns += pk * K.perKm * K.ns + (1 - K.succ) * K.eNs + (seed / 2147483648 < K.rp ? -K.rd : 0); }",
+"      acc.addNs += ns + hp * K.line; acc.parts += parts; } }",
+"  postMessage({ k: D.k, acc: acc, ms: Date.now() - t0 }); };"].join("\n");
+function bgData(){
+  var cut = {}; avoided.forEach(function(x){ cut[x] = 1; var ab = x.split('-'); cut[ab[1] + '-' + ab[0]] = 1; });
+  return { n: CITY.length, adj: adj, cut: cut, noRelay: CITY.map(function(c, i){ return noRelay(i) ? 1 : 0; }),
+    w: adj.map(function(nb, u){ return nb.map(function(v){ return wt(u, v); }); }),
+    kmE: adj.map(function(nb, u){ return nb.map(function(v){ return km(CITY[u], CITY[v]); }); }),
+    k9: { P: k9val('k9Part') || 500, perKm: k9val('k9ExT') / (k9val('k9ExKm') || 1), ns: k9val('k9Ns'), succ: k9val('k9Succ'), eNs: k9val('k9Err'),
+          rp: k9val('k9Rp'), rd: k9val('k9Rd'), line: lineAddNs() } };
+}
+function bgCycle(){
+  var D = bgData(); BGW.got = []; BGW.t0 = performance.now();
+  BGW.workers.forEach(function(w, k){ D.k = k; D.K = BGW.n; w.postMessage(D); });
+}
+function bgStart(){
+  try {
+    var url = URL.createObjectURL(new Blob([BG_WORKER], { type: 'text/javascript' }));
+    for (var k = 0; k < BGW.n; k++){
+      var w = new Worker(url);
+      w.onmessage = function(e){ BGW.got.push(e.data);
+        if (BGW.got.length < BGW.n) return;
+        var a = { routes: 0, reached: 0, km: 0, maxKm: 0, addNs: 0, viaNoRelay: 0, parts: 0 };
+        BGW.got.forEach(function(g){ ['routes', 'reached', 'km', 'addNs', 'viaNoRelay', 'parts'].forEach(function(x){ a[x] += g.acc[x]; }); a.maxKm = Math.max(a.maxKm, g.acc.maxKm); });
+        a.ms = performance.now() - BGW.t0; a.threadMs = BGW.got.map(function(g){ return g.ms; });
+        BG.cycle++; BG.last = a; bgRender(); setTimeout(bgCycle, 50); };
+      w.onerror = function(err){ if (BGW.on){ BGW.on = false; BG.err = null; BGW.workers.forEach(function(x){ x.terminate(); }); setTimeout(bgStep, 30); } };
+      BGW.workers.push(w);
+    }
+    BGW.on = true; bgCycle();
+  } catch (e){ BGW.on = false; setTimeout(bgStep, 200); }
 }
 function bgRender(){
   var L = BG.last, tb = document.querySelector("#bgT tbody"); if (!L) return; tb.innerHTML = "";
@@ -589,9 +654,33 @@ function bgRender(){
    ['Relayed through Luxembourg', L.viaNoRelay + (L.viaNoRelay ? ' - NOT ALLOWED' : ', none, as set')],
    ['Average route', nsTxt(Math.round(L.km / Math.max(1, L.reached))) + ' km, longest ' + nsTxt(Math.round(L.maxKm)) + ' km'],
    ['Average K9 add-on', nsTxt(Math.round(L.addNs / Math.max(1, L.reached))) + ' ns, ' + nsTxt(Math.round(L.parts / Math.max(1, L.reached) * 10) / 10) + ' parts a route'],
-   ['One full cycle', nsTxt(Math.round(L.ms)) + ' ms of work, spread between frames']]
+   ['Where it runs', BGW.on ? 'Three CPU threads (workers), this device has ' + (navigator.hardwareConcurrency || 'an unknown number of') + ' logical processors' : 'The page thread, in slices between frames (workers not available here)'],
+   ['One full cycle', nsTxt(Math.round(L.ms)) + ' ms' + (L.threadMs ? ', threads ' + L.threadMs.map(function(m){ return Math.round(m) + ' ms'; }).join(', ') : ', spread between frames')]]
   .forEach(function(r){ var tr = document.createElement("tr"); tr.innerHTML = '<td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td>'; tb.appendChild(tr); });
-  window.__bg = { cycle: BG.cycle, routes: L.routes, reached: L.reached, viaNoRelay: L.viaNoRelay, ms: L.ms, err: BG.err || null };
+  window.__bg = { cycle: BG.cycle, routes: L.routes, reached: L.reached, viaNoRelay: L.viaNoRelay, ms: L.ms, err: BG.err || null, threads: BGW.on ? BGW.n : 1, avgAddNs: L.addNs / Math.max(1, L.reached), avgKm: L.km / Math.max(1, L.reached) };
+}
+
+/* ONCE A MINUTE, every line: its length, the time light takes in its fibre, and the cable and
+   machine parts added to it. Done on opening, then every 60 s, and again when a part is changed. */
+var LN = { count: 0, at: 0 };
+function linesOnce(){
+  var tb = document.querySelector("#lnT tbody"), cp = k9val('lnCp') * k9val('lnCd'), mp = k9val('lnMp') * k9val('lnMd'), cut = {}, total = 0, frag = document.createDocumentFragment();
+  avoided.forEach(function(x){ cut[x] = 1; var ab = x.split('-'); cut[ab[1] + '-' + ab[0]] = 1; });
+  links.map(function(l){ return [l, km(CITY[l[0]], CITY[l[1]])]; }).sort(function(a, b){ return b[1] - a[1]; }).forEach(function(x){
+    var l = x[0], d = x[1], cab = d * CABLE_FACTOR, fns = cab / C_FIBRE * 1e9, tot = fns + cp + mp; total += tot;
+    var tr = document.createElement("tr");
+    tr.innerHTML = '<td>' + esc(CITY[l[0]][0] + ' to ' + CITY[l[1]][0]) + '</td><td class="n">' + Math.round(d) + '</td><td class="n">' + Math.round(cab) + '</td><td class="n">'
+      + nsTxt(Math.round(fns)) + '</td><td class="n">' + nsTxt(cp) + '</td><td class="n">' + nsTxt(mp) + '</td><td class="n">' + nsTxt(Math.round(tot * 1000) / 1000) + '</td><td>'
+      + (cut[l[0] + '-' + l[1]] ? 'Cut' : (l[3] === 'sea' ? 'Sea, in service' : 'In service')) + '</td>';
+    frag.appendChild(tr); });
+  tb.innerHTML = ""; tb.appendChild(frag);
+  LN.count++; LN.at = Date.now(); LN.total = total; lnNote();
+  window.__lines = { count: LN.count, lines: links.length, rows: tb.rows.length, addNs: cp + mp };
+}
+function lnNote(){
+  var d = new Date(LN.at), next = Math.max(0, 60 - Math.round((Date.now() - LN.at) / 1000)), two = function(n){ return (n < 10 ? '0' : '') + n; };
+  document.getElementById("lnNote").textContent = links.length + ' lines, calculated ' + (LN.count === 1 ? 'once' : LN.count + ' times') + ', last at ' + two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds())
+    + ', next in ' + next + ' s. Each line gets ' + nsTxt(Math.round((k9val('lnCp') * k9val('lnCd') + k9val('lnMp') * k9val('lnMd')) * 10000) / 10000) + ' ns of cable and machine parts.';
 }
 
 /* ZOOM. The map is drawn in its own units; zooming changes which part of them the screen shows.
@@ -833,7 +922,7 @@ function selfCheck(){
 document.getElementById("remap").onclick=remap;
 elFrom.addEventListener("change", function(){ go(); remap(); });
 document.getElementById("route").onclick=go;
-["k9Part","k9ExKm","k9ExT","k9Ns","k9Succ","k9Err","k9Rp","k9Rd","k9Ping","k9Cross","k9Div"].forEach(function(id){ var e=document.getElementById(id); e.oninput=e.onchange=function(){ k9(current); }; });
+["k9Part","k9ExKm","k9ExT","k9Ns","k9Succ","k9Err","k9Rp","k9Rd","k9Ping","k9Cross","k9Div","lnCp","lnCd","lnMp","lnMd"].forEach(function(id){ var e=document.getElementById(id); e.oninput=e.onchange=function(){ k9(current); linesOnce(); }; });
 document.getElementById("weigh").onchange=function(){ WEIGH=this.value; go(); remap(); };
 document.getElementById("reroute").onclick=reroute;
 document.getElementById("csv").onclick=function(){
@@ -877,7 +966,7 @@ document.getElementById("tplBtn").onclick = function(){ var a = document.createE
   a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(templateCSV()); a.download = "network-data-template.csv"; a.click(); };
 document.getElementById("dataNote").textContent = 'No network data file loaded: hardware and cable providers are not published by carriers, so each row shows the modelled class. LOAD NETWORK DATA puts real makes, models, addresses and providers on every routing.';
 renderBoxes(); renderRouters(); renderThetaAll();
-go(); remap(); setTimeout(bgStep, 200);
+go(); remap(); linesOnce(); setInterval(linesOnce, 60000); setInterval(lnNote, 1000); bgStart();
 window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
   links:function(){ return links.length; }, sea:function(){ return links.filter(function(l){return l[3]==='sea';}).map(function(l){return CITY[l[0]][0]+'-'+CITY[l[1]][0];}); },
   check:selfCheck, bg:function(){ return window.__bg; }, k9:function(){ return window.__k9; }, parting:function(){ return window.__parting; }, weigh:function(m){ WEIGH=m; document.getElementById('weigh').value=m; go(); remap(); return { r: routeR(current), km: routeKm(current), via: current.map(function(i){ return CITY[i][0]; }) }; }, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
