@@ -103,12 +103,14 @@
   </div>
   <table id="hops"><thead><tr><th>#</th><th>exchange</th>
     <th class="n">leg km</th><th class="n">running km</th>
-    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th><th>hardware</th><th>cable in, provider</th><th class="n">R entering</th></tr></thead><tbody></tbody></table>
+    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th><th>hardware</th><th>cable in, provider</th><th class="n">R entering</th><th class="n">angle to horizon</th><th class="n">secant</th></tr></thead><tbody></tbody></table>
 
   <div id="dataNote" style="margin-top:8px;font-size:12px;color:#7c93a6"></div>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">FULL PARTING, EVERY PART OF THE NETWORK CHECKED</h2>
   <table id="partT"><thead><tr><th>part</th><th class="n">cities</th><th class="n">countries</th><th>reached from the start</th></tr></thead><tbody></tbody></table>
   <div id="partNote" style="margin-top:6px;font-size:12px;color:#7c93a6"></div>
+  <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">BACKGROUND, EVERY ROUTE CALCULATED ALL THE TIME</h2>
+  <table id="bgT"><tbody></tbody></table>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">K9 THETA ADD-ON TO DISTANCE, GIVEN MODEL, PART BY PART</h2>
   <div class="k9v">
     <label>part length km<input id="k9Part" type="number" step="any" value="500"></label>
@@ -120,6 +122,7 @@
     <label>RND probability<input id="k9Rp" type="number" step="any" value="0.4"></label>
     <label>RND deducted ns<input id="k9Rd" type="number" step="any" value="24"></label>
     <label>ping ms<input id="k9Ping" type="number" step="any" value="10"></label>
+    <label>K9 divisor<input id="k9Div" type="number" step="any" value="5.01"></label>
     <label>crossing thetas<select id="k9Cross"><option value="1">Included</option><option value="0">Left out</option></select></label>
   </div>
   <table id="k9T"><thead><tr><th>part</th><th class="n">km in part</th><th class="n">thetas</th><th class="n">theta ns</th><th class="n">errors</th><th class="n">error ns</th><th>RND</th><th class="n">part ns</th></tr></thead><tbody></tbody></table>
@@ -293,6 +296,10 @@ function xy(c){
 }
 
 /* Dijkstra over the modelled links, cost in cable kilometres. */
+/* NO RELAY. Luxembourg is one solid area in the calculation: a route may start or end there,
+   but no route is relayed through it. */
+var NO_RELAY = { "Luxembourg": 1 };
+function noRelay(i){ return !!NO_RELAY[CITY[i][3]]; }
 function path(s,t,avoid){
   var n=CITY.length, dist=[], prev=[], seen=[], i;
   for(i=0;i<n;i++){dist.push(Infinity);prev.push(-1);seen.push(false);}
@@ -302,6 +309,7 @@ function path(s,t,avoid){
     for(i=0;i<n;i++) if(!seen[i]&&dist[i]<best){best=dist[i];u=i;}
     if(u<0||u===t) break;
     seen[u]=true;
+    if(u!==s && noRelay(u)) continue;      /* a no-relay area: reached, never passed through */
     for(i=0;i<adj[u].length;i++){
       var v=adj[u][i];
       if(avoid && avoid.indexOf(u+'-'+v)>=0) continue;
@@ -373,7 +381,8 @@ function show(p){
     var bx = boxesAt(i, p.length - 1), us = boxUs(bx);
     tr.innerHTML += '<td>'+bx.map(function(k){ return BOXES[k][0]; }).join(", ")+'</td><td class="n">'+us.toFixed(1)+'</td><td class="n">'+fibreKm(us).toFixed(1)+'</td>'
       + '<td>'+esc(hardwareOf(p[i]))+'</td><td>'+(i ? esc(cableOf(p[i-1], p[i], leg)) : '&mdash;')+'</td>'
-      + '<td class="n">'+(i && rAt(p[i-1], p[i]) !== null ? fmtT(rAt(p[i-1], p[i])) : (i && CITY[p[i-1]][3] !== CITY[p[i]][3] ? 'Not given' : '&mdash;'))+'</td>';
+      + '<td class="n">'+(i && rAt(p[i-1], p[i]) !== null ? fmtT(rAt(p[i-1], p[i])) : (i && CITY[p[i-1]][3] !== CITY[p[i]][3] ? 'Not given' : '&mdash;'))+'</td>'
+      + (i ? '<td class="n">'+txAngle(leg).toFixed(3).replace('.', ',')+'&deg;</td><td class="n">'+(1/Math.cos(txAngle(leg)*Math.PI/180)).toFixed(6).replace('.', ',')+'</td>' : '<td class="n">&mdash;</td><td class="n">&mdash;</td>');
     tb.appendChild(tr);
   }
   var cable=run*CABLE_FACTOR;
@@ -458,7 +467,7 @@ function bellmanAv(s, av){
   var cut = {}; (av || []).forEach(function(x){ cut[x] = 1; var ab = x.split('-'); cut[ab[1] + '-' + ab[0]] = 1; });
   var d = CITY.map(function(){ return Infinity; }), k; d[s] = 0;
   for (k = 0; k < CITY.length; k++) links.forEach(function(l){ var a = l[0], b = l[1]; if (cut[a + '-' + b]) return;
-    if (d[a] + wt(a, b) < d[b]) d[b] = d[a] + wt(a, b); if (d[b] + wt(b, a) < d[a]) d[a] = d[b] + wt(b, a); });
+    if ((a === s || !noRelay(a)) && d[a] + wt(a, b) < d[b]) d[b] = d[a] + wt(a, b); if ((b === s || !noRelay(b)) && d[b] + wt(b, a) < d[a]) d[a] = d[b] + wt(b, a); });
   return d;
 }
 function fullParting(){
@@ -523,11 +532,66 @@ function k9(p){
    ['One way with add-on', nsTxt(Math.round((oneWay + t.ns / 1e6) * 10000) / 10000) + ' ms (fibre and boxes ' + nsTxt(Math.round(oneWay * 10000) / 10000) + ' ms)'],
    ['Ping with add-on', nsTxt(k9val('k9Ping')) + ' ms becomes ' + nsTxt(Math.round((k9val('k9Ping') + t.ns / 1e6) * 1e6) / 1e6) + ' ms'],
    ['Given example check', nsTxt(k9val('k9ExKm')) + ' km = ' + ex.n + ' parts, ' + nsTxt(ex.thetas) + ' thetas, ' + nsTxt(ex.thetaNs) + ' ns from distance, ping ' + nsTxt(k9val('k9Ping')) + ' ms becomes ' + (k9val('k9Ping') + ex.thetaNs / 1e6).toLocaleString('fi-FI', { maximumFractionDigits: 6 }) + ' ms'],
+   ['K9 variable', 'Add-on ' + nsTxt(t.ns / 1e6) + ' ms divided by ' + nsTxt(k9val('k9Div')) + ' = ' + (t.ns / 1e6 / (k9val('k9Div') || 1)).toLocaleString('fi-FI', { maximumFractionDigits: 6 })
+     + ', example 0,0462 divided by ' + nsTxt(k9val('k9Div')) + ' = ' + (ex.thetaNs / 1e6 / (k9val('k9Div') || 1)).toLocaleString('fi-FI', { maximumFractionDigits: 6 })],
    ['What this is', 'The given model, as stated, kept apart from the measured physics']]
   .forEach(function(r){ var tr = document.createElement("tr"); tr.innerHTML = '<td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td>'; sb.appendChild(tr); });
   window.__k9 = { km: km, parts: t.n, thetas: t.thetas, thetaNs: t.thetaNs, crossNs: t.crossNs, errorNs: t.errorNs, rndNs: t.rndNs, ns: t.ns,
     exParts: ex.n, exThetas: ex.thetas, exNs: ex.thetaNs };
   return window.__k9;
+}
+
+/* THE ANGLE OF TRANSMISSION. A straight line between two routers leaves the ground at an angle
+   to the horizon - the Earth curves away under it - of half the arc between them. Its secant is
+   how much longer the slanted line is than the level one over the same run. */
+function txAngle(legKm){ return legKm / 6371 / 2 * 180 / Math.PI; }
+
+/* IN THE BACKGROUND, ALL THE TIME. Every route from every city to every other city, worked out
+   again and again in small slices between frames, with the cuts, the weighing and the no-relay
+   area as they are at that moment. Each cycle gives the counts below. */
+var BG = { cycle: 0, s: 0, acc: null, last: null, t0: 0 };
+function spAll(s){
+  var n = CITY.length, dist = [], prev = [], seen = [], i, cut = {};
+  avoided.forEach(function(x){ cut[x] = 1; var ab = x.split('-'); cut[ab[1] + '-' + ab[0]] = 1; });
+  for (i = 0; i < n; i++){ dist.push(Infinity); prev.push(-1); seen.push(false); }
+  dist[s] = 0;
+  for (;;){ var u = -1, best = Infinity;
+    for (i = 0; i < n; i++) if (!seen[i] && dist[i] < best){ best = dist[i]; u = i; }
+    if (u < 0) break; seen[u] = true;
+    if (u !== s && noRelay(u)) continue;
+    adj[u].forEach(function(v){ if (cut[u + '-' + v]) return; var w = wt(u, v); if (dist[u] + w < dist[v]){ dist[v] = dist[u] + w; prev[v] = u; } });
+  }
+  return { dist: dist, prev: prev };
+}
+function bgStep(){
+  var until = performance.now() + 8;
+  try {
+    while (performance.now() < until){
+      if (!BG.acc){ BG.acc = { routes: 0, reached: 0, km: 0, maxKm: 0, addNs: 0, viaNoRelay: 0, parts: 0 }; BG.t0 = performance.now(); BG.s = 0; }
+      var r = spAll(BG.s), a = BG.acc;
+      for (var t = 0; t < CITY.length; t++){ if (t === BG.s) continue; a.routes++;
+        if (r.dist[t] === Infinity) continue; a.reached++;
+        var c = r.prev[t], kmT = 0, x = t;
+        while (c >= 0){ kmT += km(CITY[c], CITY[x]); if (c !== BG.s && noRelay(c)) a.viaNoRelay++; x = c; c = r.prev[c]; }
+        a.km += kmT; if (kmT > a.maxKm) a.maxKm = kmT;
+        var k = k9calc(kmT, 0, 7); a.addNs += k.ns; a.parts += k.n;
+      }
+      if (++BG.s >= CITY.length){ BG.cycle++; BG.acc.ms = performance.now() - BG.t0; BG.last = BG.acc; BG.acc = null; bgRender(); }
+    }
+  } catch (e){ BG.err = String(e && e.message || e); }
+  setTimeout(bgStep, 30);
+}
+function bgRender(){
+  var L = BG.last, tb = document.querySelector("#bgT tbody"); if (!L) return; tb.innerHTML = "";
+  [['Cycles done', String(BG.cycle) + ', running all the time while the page is open'],
+   ['Routes each cycle', L.routes + ', every city to every other city'],
+   ['Reached', L.reached + ' of ' + L.routes],
+   ['Relayed through Luxembourg', L.viaNoRelay + (L.viaNoRelay ? ' - NOT ALLOWED' : ', none, as set')],
+   ['Average route', nsTxt(Math.round(L.km / Math.max(1, L.reached))) + ' km, longest ' + nsTxt(Math.round(L.maxKm)) + ' km'],
+   ['Average K9 add-on', nsTxt(Math.round(L.addNs / Math.max(1, L.reached))) + ' ns, ' + nsTxt(Math.round(L.parts / Math.max(1, L.reached) * 10) / 10) + ' parts a route'],
+   ['One full cycle', nsTxt(Math.round(L.ms)) + ' ms of work, spread between frames']]
+  .forEach(function(r){ var tr = document.createElement("tr"); tr.innerHTML = '<td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td>'; tb.appendChild(tr); });
+  window.__bg = { cycle: BG.cycle, routes: L.routes, reached: L.reached, viaNoRelay: L.viaNoRelay, ms: L.ms, err: BG.err || null };
 }
 
 /* ZOOM. The map is drawn in its own units; zooming changes which part of them the screen shows.
@@ -739,7 +803,7 @@ function remap(){
 function bellman(s,t){
   var d=CITY.map(function(){return Infinity;}), k; d[s]=0;
   for(k=0;k<CITY.length;k++) links.forEach(function(l){ var a=l[0], b=l[1];
-    if(d[a]+wt(a,b)<d[b]) d[b]=d[a]+wt(a,b); if(d[b]+wt(b,a)<d[a]) d[a]=d[b]+wt(b,a); });
+    if((a===s||!noRelay(a)) && d[a]+wt(a,b)<d[b]) d[b]=d[a]+wt(a,b); if((b===s||!noRelay(b)) && d[b]+wt(b,a)<d[a]) d[a]=d[b]+wt(b,a); });
   return d[t];
 }
 var checkFails=[];
@@ -755,6 +819,9 @@ function selfCheck(){
     if(Math.abs(km(CITY[a],CITY[b])-km(CITY[b],CITY[a]))>1e-9) f.push('a distance differs by direction'); }
   if(window.__k9 && k9val('k9ExKm')===1853 && k9val('k9ExT')===1320 && k9val('k9Ns')===35 && k9val('k9Part')===500 && (Math.abs(window.__k9.exNs-46200)>1e-6 || window.__k9.exParts!==5)) f.push('the K9 example does not come out at 5 parts and 46200 ns');
   if(window.__k9 && window.__k9.parts!==Math.ceil(window.__k9.km/(k9val('k9Part')||500))+1) f.push('the K9 parts do not follow every started part');
+  if(window.__bg && window.__bg.viaNoRelay) f.push('a route is relayed through Luxembourg');
+  if(window.__bg && window.__bg.err) f.push('the background calculation stopped: '+window.__bg.err);
+  if(current) for(var q=1;q<current.length-1;q++) if(noRelay(current[q])) f.push('this route is relayed through Luxembourg');
   if(window.__parting && window.__parting.wrong) f.push(window.__parting.wrong+' routes after the parting are not the shortest');
   checkFails=f;
   var el=document.getElementById("checks");
@@ -766,7 +833,7 @@ function selfCheck(){
 document.getElementById("remap").onclick=remap;
 elFrom.addEventListener("change", function(){ go(); remap(); });
 document.getElementById("route").onclick=go;
-["k9Part","k9ExKm","k9ExT","k9Ns","k9Succ","k9Err","k9Rp","k9Rd","k9Ping","k9Cross"].forEach(function(id){ var e=document.getElementById(id); e.oninput=e.onchange=function(){ k9(current); }; });
+["k9Part","k9ExKm","k9ExT","k9Ns","k9Succ","k9Err","k9Rp","k9Rd","k9Ping","k9Cross","k9Div"].forEach(function(id){ var e=document.getElementById(id); e.oninput=e.onchange=function(){ k9(current); }; });
 document.getElementById("weigh").onchange=function(){ WEIGH=this.value; go(); remap(); };
 document.getElementById("reroute").onclick=reroute;
 document.getElementById("csv").onclick=function(){
@@ -810,10 +877,10 @@ document.getElementById("tplBtn").onclick = function(){ var a = document.createE
   a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(templateCSV()); a.download = "network-data-template.csv"; a.click(); };
 document.getElementById("dataNote").textContent = 'No network data file loaded: hardware and cable providers are not published by carriers, so each row shows the modelled class. LOAD NETWORK DATA puts real makes, models, addresses and providers on every routing.';
 renderBoxes(); renderRouters(); renderThetaAll();
-go(); remap();
+go(); remap(); setTimeout(bgStep, 200);
 window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
   links:function(){ return links.length; }, sea:function(){ return links.filter(function(l){return l[3]==='sea';}).map(function(l){return CITY[l[0]][0]+'-'+CITY[l[1]][0];}); },
-  check:selfCheck, k9:function(){ return window.__k9; }, parting:function(){ return window.__parting; }, weigh:function(m){ WEIGH=m; document.getElementById('weigh').value=m; go(); remap(); return { r: routeR(current), km: routeKm(current), via: current.map(function(i){ return CITY[i][0]; }) }; }, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
+  check:selfCheck, bg:function(){ return window.__bg; }, k9:function(){ return window.__k9; }, parting:function(){ return window.__parting; }, weigh:function(m){ WEIGH=m; document.getElementById('weigh').value=m; go(); remap(); return { r: routeR(current), km: routeKm(current), via: current.map(function(i){ return CITY[i][0]; }) }; }, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
   plan:function(hops){ var p=[]; for(var i=0;i<=hops;i++) p.push(i); return rebuildPlan(p); },
   rebuild:function(){ return rb ? {built:rb.built, hops:rb.p.length-1, total:rb.plan.total, done:!!rb.done,
     stage:document.getElementById("rbStage").textContent} : null; },
