@@ -80,6 +80,7 @@
   <div class="bar">
     <div><label>from</label><select id="from"></select></div>
     <div><label>to</label><select id="to"></select></div>
+    <div><label>routing protocol</label><select id="proto"><option value="km">Shortest cable km</option><option value="ospf">OSPF</option><option value="eigrp">EIGRP</option><option value="isis">IS-IS</option><option value="rip">RIP</option><option value="bgp">BGP</option></select></div>
     <div><label>weigh routes by</label><select id="weigh"><option value="km">Cable km</option><option value="r">Cable km and R at crossings</option></select></div>
     <div><label>&nbsp;</label><button class="go" id="route">ROUTE</button></div>
     <div><label>&nbsp;</label><button class="alt" id="reroute">REROUTE</button></div>
@@ -103,7 +104,7 @@
   </div>
   <table id="hops"><thead><tr><th>#</th><th>exchange</th>
     <th class="n">leg km</th><th class="n">running km</th>
-    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th><th>hardware</th><th>cable in, provider</th><th class="n">R entering</th><th class="n">angle to horizon</th><th class="n">secant</th></tr></thead><tbody></tbody></table>
+    <th class="n">leg ms</th><th>boxes in this router</th><th class="n">box us</th><th class="n">same as fibre km</th><th>hardware</th><th>cable in, provider</th><th>link, protocol cost</th><th class="n">R entering</th><th class="n">angle to horizon</th><th class="n">secant</th></tr></thead><tbody></tbody></table>
 
   <div id="dataNote" style="margin-top:8px;font-size:12px;color:#7c93a6"></div>
   <h2 style="font-size:11px;letter-spacing:.12em;color:var(--dim);margin:18px 0 4px">FULL PARTING, EVERY PART OF THE NETWORK CHECKED</h2>
@@ -308,6 +309,20 @@ function xy(c){
 var NO_RELAY = { "Luxembourg": 1 };
 function noRelay(i){ return !!NO_RELAY[CITY[i][3]]; }
 function path(s,t,avoid){
+  if (PROTO === "eigrp") return pathEigrp(s, t, avoid);
+  var p0 = pathCore(s, t, avoid, null);
+  if (p0 && PROTO === "rip" && p0.length - 1 > 15) return null;      /* 16 hops is unreachable in RIP */
+  return p0;
+}
+/* EIGRP: the best composite metric. For each bandwidth level, only links at least that fast are used and the
+   delay is made least; the best of those is the best path overall - exact, as there are only three levels. */
+function pathEigrp(s, t, avoid){
+  var best = null, bm = Infinity;
+  [400, 100, 10].forEach(function(lv){ var p = pathCore(s, t, avoid, function(u, v){ return bwOf(u, v) >= lv; });
+    if (p){ var m = eigrpMetric(p); if (m < bm){ bm = m; best = p; } } });
+  return best;
+}
+function pathCore(s,t,avoid,allow){
   var n=CITY.length, dist=[], prev=[], seen=[], i;
   for(i=0;i<n;i++){dist.push(Infinity);prev.push(-1);seen.push(false);}
   dist[s]=0;
@@ -321,6 +336,7 @@ function path(s,t,avoid){
       var v=adj[u][i];
       if(avoid && avoid.indexOf(u+'-'+v)>=0) continue;
       if(avoid && avoid.indexOf(v+'-'+u)>=0) continue;
+      if(allow && !allow(u,v)) continue;
       var w=wt(u,v);
       if(dist[u]+w<dist[v]){dist[v]=dist[u]+w;prev[v]=u;}
     }
@@ -388,6 +404,7 @@ function show(p){
     var bx = boxesAt(i, p.length - 1), us = boxUs(bx);
     tr.innerHTML += '<td>'+bx.map(function(k){ return BOXES[k][0]; }).join(", ")+'</td><td class="n">'+us.toFixed(1)+'</td><td class="n">'+fibreKm(us).toFixed(1)+'</td>'
       + '<td>'+esc(hardwareOf(p[i]))+'</td><td>'+(i ? esc(cableOf(p[i-1], p[i], leg)) : '&mdash;')+'</td>'
+      + '<td>'+(i ? bwOf(p[i-1], p[i])+' Gbit/s, '+linkCostTxt(p[i-1], p[i]) : '&mdash;')+'</td>'
       + '<td class="n">'+(i && rAt(p[i-1], p[i]) !== null ? fmtT(rAt(p[i-1], p[i])) : (i && CITY[p[i-1]][3] !== CITY[p[i]][3] ? 'Not given' : '&mdash;'))+'</td>'
       + (i ? '<td class="n">'+txAngle(leg).toFixed(3).replace('.', ',')+'&deg;</td><td class="n">'+(1/Math.cos(txAngle(leg)*Math.PI/180)).toFixed(6).replace('.', ',')+'</td>' : '<td class="n">&mdash;</td><td class="n">&mdash;</td>');
     tb.appendChild(tr);
@@ -407,7 +424,9 @@ function show(p){
     ["straight line", straight.toFixed(0)+" km"],
     ["going round by", ((run/straight-1)*100).toFixed(0)+"%"],
     ["R on route, in series", fmtT(Math.round(routeR(p)*1000)/1000)],
-    ["weighed by", WEIGH==="r" ? "km and R" : "km"]
+    ["weighed by", WEIGH==="r" && PROTO==="km" ? "km and R" : "km"],
+    ["routing protocol", protoName()],
+    ["protocol metric", (PROTO==="km"?Math.round(protoMetric(p)):protoMetric(p)).toLocaleString("fi-FI")+protoUnit()]
   ];
   document.getElementById("cards").innerHTML = cards.map(function(c){
     return '<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>';
@@ -452,7 +471,35 @@ function renderThetaAll(){
    as one km - and routes, reroutes and the remap all go round the high-R borders. */
 var WEIGH = "km";
 function rAt(u, v){ if (CITY[u][3] === CITY[v][3]) return null; var t = thetaOf(CITY[v][3]); return t ? t[1] : null; }
-function wt(u, v){ var w = km(CITY[u], CITY[v]); if (WEIGH === "r"){ var r = rAt(u, v); if (r) w += r; } return w; }
+/* ROUTING PROTOCOLS. The same network routed the way each protocol chooses its way:
+   OSPF   - cost per link = reference bandwidth (1 Tbit/s) / link bandwidth: 400G = 3, 100G = 10, 10G = 100
+   IS-IS  - the default metric, 10 on every link
+   RIP    - hop count, and nothing over 15 hops can be reached
+   EIGRP  - composite metric, 256 x (10^7 / lowest bandwidth in kbit/s + total delay in tens of microseconds)
+   BGP    - shortest AS path, each country one AS; among equal paths, the shortest km
+   Link bandwidth follows the routers at its ends (core 400G, distribution 100G, edge 10G; sea cables
+   100G), modelled and said. The R at crossings is added only when routing by cable km. */
+var PROTO = "km";
+function bwOf(u, v){ var sea = links.some(function(k){ return k[3] === 'sea' && ((k[0] === u && k[1] === v) || (k[0] === v && k[1] === u)); });
+  if (sea) return 100; var c = function(i){ var r = roleOf(i); return r === "Core" ? 400 : (r === "Distribution" ? 100 : 10); }; return Math.min(c(u), c(v)); }
+function delayUs(u, v){ return km(CITY[u], CITY[v]) * CABLE_FACTOR / C_FIBRE * 1e6; }
+function ospfCost(u, v){ return Math.max(1, Math.round(1000 / bwOf(u, v))); }
+function wt(u, v){
+  if (PROTO === "ospf") return ospfCost(u, v);
+  if (PROTO === "isis") return 10;
+  if (PROTO === "rip") return 1;
+  if (PROTO === "eigrp") return delayUs(u, v);
+  if (PROTO === "bgp") return (CITY[u][3] !== CITY[v][3] ? 1e6 : 0) + km(CITY[u], CITY[v]);
+  var w = km(CITY[u], CITY[v]); if (WEIGH === "r"){ var r = rAt(u, v); if (r) w += r; } return w; }
+function eigrpMetric(p){ var minBw = Infinity, dly = 0; for (var i = 1; i < p.length; i++){ minBw = Math.min(minBw, bwOf(p[i-1], p[i])); dly += delayUs(p[i-1], p[i]); }
+  return Math.round(256 * (1e7 / (minBw * 1e6) + dly / 10)); }
+function protoMetric(p){ if (!p) return null;
+  if (PROTO === "eigrp") return eigrpMetric(p);
+  if (PROTO === "bgp"){ var as = 1; for (var i = 1; i < p.length; i++) if (CITY[p[i-1]][3] !== CITY[p[i]][3]) as++; return as; }
+  return routeCost(p); }
+function linkCostTxt(u, v){ return PROTO === 'ospf' ? 'OSPF ' + ospfCost(u, v) : PROTO === 'isis' ? 'IS-IS 10' : PROTO === 'rip' ? 'RIP 1 hop' : PROTO === 'eigrp' ? 'EIGRP delay ' + (delayUs(u, v) / 10).toFixed(0) + ' x 10 us' : PROTO === 'bgp' ? (CITY[u][3] !== CITY[v][3] ? 'BGP new AS' : 'BGP same AS') : Math.round(km(CITY[u], CITY[v])) + ' km'; }
+function protoName(){ return { km: "Shortest cable km", ospf: "OSPF", eigrp: "EIGRP", isis: "IS-IS", rip: "RIP", bgp: "BGP" }[PROTO]; }
+function protoUnit(){ return { km: " km-equivalent", ospf: " OSPF cost", eigrp: " EIGRP metric", isis: " IS-IS metric", rip: " hops", bgp: " AS in the path" }[PROTO]; }
 function routeR(p){ var r = 0; for (var i = 1; i < p.length; i++){ var x = rAt(p[i-1], p[i]); if (x) r += x; } return r; }
 function routeCost(p){ var c = 0; for (var i = 1; i < p.length; i++) c += wt(p[i-1], p[i]); return c; }
 
@@ -478,11 +525,12 @@ function bellmanAv(s, av){
   return d;
 }
 function fullParting(){
-  var s0 = +elFrom.value, P = partsWithout(avoided), d2 = bellmanAv(s0, avoided), reach = 0, bad = 0, t0 = performance.now();
+  var s0 = +elFrom.value, P = partsWithout(avoided), d2 = bellmanAv(s0, avoided), reach = 0, bad = 0, t0 = performance.now(), eb = PROTO === 'eigrp' ? eigrpBruteAll(s0) : null;
   var parts = []; for (var k = 0; k < P.n; k++) parts.push({ cities: 0, countries: {}, start: false });
   CITY.forEach(function(c, i){ var q = parts[P.comp[i]]; q.cities++; q.countries[c[3]] = 1; if (i === s0) q.start = true; });
   CITY.forEach(function(c, i){ if (i === s0) return; var p = path(s0, i, avoided.length ? avoided : null);
-    if (p){ reach++; if (Math.abs(routeCost(p) - d2[i]) > 1e-6) bad++; } else if (d2[i] !== Infinity) bad++; });
+    if (p){ reach++; if (PROTO === 'eigrp' ? eb[i] !== null && eigrpMetric(p) > eb[i] : Math.abs(routeCost(p) - d2[i]) > 1e-6 * Math.max(1, d2[i])) bad++; }
+    else if (d2[i] !== Infinity && !(PROTO === 'rip' && d2[i] > 15)) bad++; });
   var tb = document.querySelector("#partT tbody"); tb.innerHTML = "";
   parts.forEach(function(q, k){ var tr = document.createElement("tr");
     tr.innerHTML = '<td>Part ' + (k + 1) + '</td><td class="n">' + q.cities + '</td><td class="n">' + Object.keys(q.countries).length + '</td><td>'
@@ -889,6 +937,24 @@ function remap(){
 }
 /* THE PAGE CHECKS ITSELF: one network covering every country, each route the shortest (worked
    again a second way), and the distances the same both ways. */
+/* the second way for EIGRP: Bellman-Ford on delay at each bandwidth level, the best composite of the three */
+function eigrpBrute(s, t){ var best = null;
+  [400, 100, 10].forEach(function(lv){ var d = CITY.map(function(){ return Infinity; }), pr = CITY.map(function(){ return -1; }), k; d[s] = 0;
+    for (k = 0; k < CITY.length; k++) links.forEach(function(l){ var a = l[0], b = l[1]; if (bwOf(a, b) < lv) return;
+      if ((a === s || !noRelay(a)) && d[a] + delayUs(a, b) < d[b]){ d[b] = d[a] + delayUs(a, b); pr[b] = a; }
+      if ((b === s || !noRelay(b)) && d[b] + delayUs(b, a) < d[a]){ d[a] = d[b] + delayUs(b, a); pr[a] = b; } });
+    if (d[t] === Infinity) return; var p = [t], c = t; while (pr[c] >= 0){ c = pr[c]; p.unshift(c); } var m = eigrpMetric(p); if (best === null || m < best) best = m; });
+  return best; }
+/* the same, for every target at once: three Bellman-Ford runs from one start */
+function eigrpBruteAll(s){ var best = CITY.map(function(){ return null; });
+  [400, 100, 10].forEach(function(lv){ var d = CITY.map(function(){ return Infinity; }), pr = CITY.map(function(){ return -1; }), k, cut = {}; d[s] = 0;
+    avoided.forEach(function(x){ cut[x] = 1; var ab = x.split('-'); cut[ab[1] + '-' + ab[0]] = 1; });
+    for (k = 0; k < CITY.length; k++){ var ch = false; links.forEach(function(l){ var a = l[0], b = l[1]; if (bwOf(a, b) < lv || cut[a + '-' + b]) return;
+      if ((a === s || !noRelay(a)) && d[a] + delayUs(a, b) < d[b]){ d[b] = d[a] + delayUs(a, b); pr[b] = a; ch = true; }
+      if ((b === s || !noRelay(b)) && d[b] + delayUs(b, a) < d[a]){ d[a] = d[b] + delayUs(b, a); pr[a] = b; ch = true; } }); if (!ch) break; }
+    for (var t = 0; t < CITY.length; t++){ if (t === s || d[t] === Infinity) continue; var p = [t], c = t; while (pr[c] >= 0){ c = pr[c]; p.unshift(c); }
+      var m = eigrpMetric(p); if (best[t] === null || m < best[t]) best[t] = m; } });
+  return best; }
 function bellman(s,t){
   var d=CITY.map(function(){return Infinity;}), k; d[s]=0;
   for(k=0;k<CITY.length;k++) links.forEach(function(l){ var a=l[0], b=l[1];
@@ -903,8 +969,12 @@ function selfCheck(){
   Object.keys(countries).forEach(function(k){ if(countries[k]!==1) f.push(k+' has '+countries[k]+' capitals marked'); });
   var seed=7; function rnd(){ seed=(seed*1103515245+12345)%2147483648; return seed/2147483648; }
   for(var n=0;n<30;n++){ var a=Math.floor(rnd()*CITY.length), b=Math.floor(rnd()*CITY.length); if(a===b) continue;
-    var p=path(a,b,null), d=routeCost(p), d2=bellman(a,b);
-    if(Math.abs(d-d2)>1e-6) f.push('the route '+CITY[a][0]+' to '+CITY[b][0]+' is not the shortest');
+    var p=path(a,b,null);
+    if(PROTO==="eigrp"){ var e2=eigrpBrute(a,b); if(p && e2!==null && eigrpMetric(p)>e2) f.push('the EIGRP route '+CITY[a][0]+' to '+CITY[b][0]+' is not the best metric'); continue; }
+    var d2=bellman(a,b);
+    if(!p){ if(!(PROTO==="rip" && d2>15)) f.push('no route '+CITY[a][0]+' to '+CITY[b][0]); continue; }
+    var d=routeCost(p);
+    if(Math.abs(d-d2)>1e-6*Math.max(1,d2)) f.push('the route '+CITY[a][0]+' to '+CITY[b][0]+' is not the shortest');
     if(Math.abs(km(CITY[a],CITY[b])-km(CITY[b],CITY[a]))>1e-9) f.push('a distance differs by direction'); }
   if(window.__k9 && k9val('k9ExKm')===1853 && k9val('k9ExT')===1320 && k9val('k9Ns')===35 && k9val('k9Part')===500 && (Math.abs(window.__k9.exNs-46200)>1e-6 || window.__k9.exParts!==5)) f.push('the K9 example does not come out at 5 parts and 46200 ns');
   if(window.__k9 && window.__k9.parts!==Math.ceil(window.__k9.km/(k9val('k9Part')||500))+1) f.push('the K9 parts do not follow every started part');
@@ -924,6 +994,7 @@ elFrom.addEventListener("change", function(){ go(); remap(); });
 document.getElementById("route").onclick=go;
 ["k9Part","k9ExKm","k9ExT","k9Ns","k9Succ","k9Err","k9Rp","k9Rd","k9Ping","k9Cross","k9Div","lnCp","lnCd","lnMp","lnMd"].forEach(function(id){ var e=document.getElementById(id); e.oninput=e.onchange=function(){ k9(current); linesOnce(); }; });
 document.getElementById("weigh").onchange=function(){ WEIGH=this.value; go(); remap(); };
+document.getElementById("proto").onchange=function(){ PROTO=this.value; document.getElementById("weigh").disabled = PROTO!=="km"; go(); remap(); linesOnce(); };
 document.getElementById("reroute").onclick=reroute;
 document.getElementById("csv").onclick=function(){
   if(!current) return;
@@ -969,7 +1040,7 @@ renderBoxes(); renderRouters(); renderThetaAll();
 go(); remap(); linesOnce(); setInterval(linesOnce, 60000); setInterval(lnNote, 1000); bgStart();
 window.__routes={ cities:CITY.length, countries:function(){ var c={}; CITY.forEach(function(x){c[x[3]]=1;}); return Object.keys(c).length; },
   links:function(){ return links.length; }, sea:function(){ return links.filter(function(l){return l[3]==='sea';}).map(function(l){return CITY[l[0]][0]+'-'+CITY[l[1]][0];}); },
-  check:selfCheck, bg:function(){ return window.__bg; }, k9:function(){ return window.__k9; }, parting:function(){ return window.__parting; }, weigh:function(m){ WEIGH=m; document.getElementById('weigh').value=m; go(); remap(); return { r: routeR(current), km: routeKm(current), via: current.map(function(i){ return CITY[i][0]; }) }; }, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
+  check:selfCheck, proto:function(m){ PROTO=m; document.getElementById('proto').value=m; go(); remap(); return current ? { metric: protoMetric(current), hops: current.length-1, km: routeKm(current), via: current.map(function(i){ return CITY[i][0]; }) } : null; }, bg:function(){ return window.__bg; }, k9:function(){ return window.__k9; }, parting:function(){ return window.__parting; }, weigh:function(m){ WEIGH=m; document.getElementById('weigh').value=m; go(); remap(); return { r: routeR(current), km: routeKm(current), via: current.map(function(i){ return CITY[i][0]; }) }; }, theta:function(){ return window.__theta; }, zoom:function(f){ var r=svg.getBoundingClientRect(); zoomBy(f, r.left+r.width/2, r.top+r.height/2); return {w:VZ.w,x:VZ.x,y:VZ.y}; }, fails:function(){ return checkFails; },
   plan:function(hops){ var p=[]; for(var i=0;i<=hops;i++) p.push(i); return rebuildPlan(p); },
   rebuild:function(){ return rb ? {built:rb.built, hops:rb.p.length-1, total:rb.plan.total, done:!!rb.done,
     stage:document.getElementById("rbStage").textContent} : null; },
