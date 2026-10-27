@@ -2,7 +2,7 @@
 window.LAW=(function(){
 // ==============================================================================================
 // laws.js - the Laws of the Game as plain data and plain functions
-// Copyright (c) AI2ORBIT Co. 2026
+// AI2ORBIT CO. Network system Pat. pend. Founded in 2018. Copyright 2018-2027. All rights reserved.
 //
 // WHY THIS IS A SEPARATE FILE, WITH NOTHING GRAPHICAL IN IT
 //
@@ -550,7 +550,7 @@ return {PITCH:PITCH,LAWS:LAWS,RESTART:RESTART,canScoreDirectly:canScoreDirectly,
 window.MATCH=(function(){
 // ==============================================================================================
 // match.js - the shape of a match: its periods, its officials, and how it is decided
-// Copyright (c) AI2ORBIT Co. 2026
+// AI2ORBIT CO. Network system Pat. pend. Founded in 2018. Copyright 2018-2027. All rights reserved.
 //
 // Week 1 put the Laws that govern the BALL into laws.js - offside, fouls, restarts, the goal.
 // This file is the other half: the Laws that govern the MATCH. Law 3 (the players and the
@@ -1256,7 +1256,7 @@ return {PERIOD:PERIOD,DURATION:DURATION,ADDED_TIME_REASONS:ADDED_TIME_REASONS,ad
 window.PROF=(function(){
 // ==============================================================================================
 // profiles.js - the competition profile layer
-// Copyright (c) AI2ORBIT Co. 2026
+// AI2ORBIT CO. Network system Pat. pend. Founded in 2018. Copyright 2018-2027. All rights reserved.
 //
 // THE POINT OF THIS FILE, IN ONE PARAGRAPH
 //

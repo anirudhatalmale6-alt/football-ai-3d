@@ -1,6 +1,6 @@
 // ==============================================================================================
 // laws.js - the Laws of the Game as plain data and plain functions
-// Copyright (c) AI2ORBIT Co. 2026
+// AI2ORBIT CO. Network system Pat. pend. Founded in 2018. Copyright 2018-2027. All rights reserved.
 //
 // WHY THIS IS A SEPARATE FILE, WITH NOTHING GRAPHICAL IN IT
 //

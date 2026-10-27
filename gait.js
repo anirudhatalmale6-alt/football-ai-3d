@@ -1,6 +1,6 @@
 /* THE RUN CYCLE, IN ONE PLACE.
  *
- * AI2ORBIT Co. (c) 2026.
+ * AI2ORBIT CO. Copyright 2018-2027. All rights reserved.
  *
  * WHY THIS FILE EXISTS. The gait was copied into play.html, into
  * runner.html and into demo.html, and the three copies drifted.

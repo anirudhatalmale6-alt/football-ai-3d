@@ -1,6 +1,6 @@
 // ==============================================================================================
 // profiles.js - the competition profile layer
-// Copyright (c) AI2ORBIT Co. 2026
+// AI2ORBIT CO. Network system Pat. pend. Founded in 2018. Copyright 2018-2027. All rights reserved.
 //
 // THE POINT OF THIS FILE, IN ONE PARAGRAPH
 //

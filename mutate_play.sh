@@ -1,7 +1,7 @@
 #!/bin/sh
 # ==============================================================================================
 # mutate_play.sh - break the GAME's use of the Laws and check the browser suite notices
-# Copyright (c) AI2ORBIT Co. 2026
+# AI2ORBIT CO. Network system Pat. pend. Founded in 2018. Copyright 2018-2027. All rights reserved.
 #
 #   sh mutate_play.sh [url]        default http://127.0.0.1:8834/play.html
 #

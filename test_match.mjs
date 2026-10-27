@@ -1,6 +1,6 @@
 // ==============================================================================================
 // test_match.mjs - the match layer and the competition profiles, checked with no browser present
-// Copyright (c) AI2ORBIT Co. 2026
+// AI2ORBIT CO. Network system Pat. pend. Founded in 2018. Copyright 2018-2027. All rights reserved.
 //
 //   node test_match.mjs
 //
